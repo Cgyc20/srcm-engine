@@ -462,26 +462,35 @@ class SRCMEngine:
         )
 
     def run_repeats(
-        self,
-        initial_ssa: np.ndarray,
-        initial_pde: Optional[np.ndarray],
-        time: float,
-        dt: float,
-        repeats: int,
-        seed: int = 0,
-    ):
+            self,
+            initial_ssa: np.ndarray,
+            initial_pde: Optional[np.ndarray],
+            time: float,
+            dt: float,
+            repeats: int,
+            seed: int = 0,
+            progress: bool = True,
+        ):
         """
         Run multiple independent simulations and return mean SSA/PDE time series.
 
-        Returns
-        -------
-        SimulationResults
-            ssa and pde are float arrays representing averages over repeats.
+        Parameters
+        ----------
+        progress : bool
+            If True, show a tqdm progress bar.
         """
         from srcm_engine.results import SimulationResults
 
         if repeats <= 0:
             raise ValueError("repeats must be > 0")
+
+        # Import tqdm only if needed (keeps core dependency optional-ish)
+        if progress:
+            try:
+                from tqdm.auto import tqdm
+            except ImportError:
+                tqdm = None
+                progress = False
 
         # Run first simulation to get shapes + time vector
         res0 = self.run(initial_ssa, initial_pde, time=time, dt=dt, seed=seed)
@@ -489,9 +498,18 @@ class SRCMEngine:
         ssa_sum = res0.ssa.astype(float)
         pde_sum = res0.pde.astype(float)
 
+        iterator = range(1, repeats)
+        if progress:
+            iterator = tqdm(
+                iterator,
+                total=repeats - 1,
+                desc="SRCM repeats",
+                unit="run",
+                dynamic_ncols=True,
+            )
+
         # Remaining repeats
-        # Use different seeds for each repeat but deterministic overall.
-        for r in range(1, repeats):
+        for r in iterator:
             res_r = self.run(initial_ssa, initial_pde, time=time, dt=dt, seed=seed + r)
             ssa_sum += res_r.ssa
             pde_sum += res_r.pde
