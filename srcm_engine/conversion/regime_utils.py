@@ -76,3 +76,43 @@ def combined_mass(ssa_counts: np.ndarray, pde_conc: np.ndarray, pde_multiple: in
 
     combined = ssa_counts.astype(int, copy=False) + pde_mass
     return combined, pde_mass
+
+
+
+def sufficient_pde_concentration_mask(
+    pde: np.ndarray,
+    pde_multiple: int,
+    h: float,
+) -> np.ndarray:
+    """
+    Return mask (n_species, K) that is 1 if ALL PDE cells in the compartment
+    have concentration >= (1/h), else 0.
+
+    This matches your original boolean_if_less_mass logic.
+
+    Parameters
+    ----------
+    pde : (n_species, Npde)
+    pde_multiple : int
+    h : float
+
+    Returns
+    -------
+    mask : (n_species, K) int array of 0/1
+    """
+    n_species, Npde = pde.shape
+    K = Npde // pde_multiple
+    if K * pde_multiple != Npde:
+        raise ValueError("Npde must be divisible by pde_multiple")
+
+    threshold = 1.0 / h
+    mask = np.zeros((n_species, K), dtype=int)
+
+    # reshape into (n_species, K, pde_multiple)
+    cells = pde.reshape(n_species, K, pde_multiple)
+
+    # all cells above threshold?
+    ok = np.all(cells >= threshold, axis=2)
+    mask[:, :] = ok.astype(int)
+
+    return mask

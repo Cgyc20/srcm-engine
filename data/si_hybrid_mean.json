@@ -1,0 +1,27 @@
+{
+  "species": [
+    "U",
+    "V"
+  ],
+  "domain": {
+    "length": 10.0,
+    "n_ssa": 18,
+    "pde_multiple": 8,
+    "boundary": "zero-flux"
+  },
+  "shapes": {
+    "time": [
+      10001
+    ],
+    "ssa": [
+      2,
+      18,
+      10001
+    ],
+    "pde": [
+      2,
+      144,
+      10001
+    ]
+  }
+}

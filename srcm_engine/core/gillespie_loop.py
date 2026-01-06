@@ -27,7 +27,9 @@ def gillespie_draw(propensities: np.ndarray, rng: np.random.Generator, cumulativ
         raise ValueError("propensities must be a 1D array")
 
     if np.any(propensities < 0):
-        raise ValueError("propensities must be nonnegative")
+        j = int(np.where(propensities < 0)[0][0])
+        raise ValueError(f"propensities must be nonnegative: idx={j}, val={propensities[j]}")
+
 
     a0 = float(np.sum(propensities))
     if a0 == 0.0:
@@ -47,7 +49,7 @@ def gillespie_draw(propensities: np.ndarray, rng: np.random.Generator, cumulativ
 
     idx = int(np.searchsorted(cumulative, u2 * a0))
     # safety clamp (rare floating edge cases)
-    if idx >= propensities.size:
-        idx = propensities.size - 1
+    # if idx >= propensities.size:
+    #     idx = propensities.size - 1
 
     return tau, idx
