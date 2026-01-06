@@ -80,3 +80,17 @@ class HybridReactionSystem:
         C = {"U": 8.4, "V": 0.1}
         """
         return ssa_counts_compartment, pde_mass_compartment
+
+    def describe(self) -> None:
+        """
+        Pretty-print all hybrid reactions in the system.
+        """
+        print("\n=== Hybrid Reactions ===")
+        for idx, hr in enumerate(self.hybrid_reactions, start=1):
+            print(f"[{idx}] {hr.label}")
+            print(f"     Reactants: {hr.reactants}")
+            print(f"     Products : {hr.products}")
+            print(f"     State Δ  : {hr.state_change}")
+            if hr.description:
+                print(f"     Info     : {hr.description}")
+            print()
