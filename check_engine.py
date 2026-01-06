@@ -173,20 +173,33 @@ def main():
     engine, meta = build_engine()
     init_ssa, init_pde = initial_conditions(engine.domain)
 
-    repeats = 5
+    repeats = 100
     seed = 1
     meta["repeats"] = int(repeats)
     meta["seed"] = int(seed)
 
     print("Running...")
+    # res_mean = engine.run_repeats(
+    #     initial_ssa=init_ssa,
+    #     initial_pde=init_pde,
+    #     time=float(meta["total_time"]),
+    #     dt=float(meta["dt"]),
+    #     repeats=repeats,
+    #     seed=seed,
+    # )
+
     res_mean = engine.run_repeats(
-        initial_ssa=init_ssa,
-        initial_pde=init_pde,
-        time=float(meta["total_time"]),
-        dt=float(meta["dt"]),
-        repeats=repeats,
-        seed=seed,
-    )
+    init_ssa, init_pde,
+    time=100.0, dt=0.01,
+    repeats=500,
+    seed=1,
+    parallel=True,
+    n_jobs=-1,
+    progress=True,
+)
+
+
+
 
     out_npz = "data/si_hybrid_mean.npz"
 

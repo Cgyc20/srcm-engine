@@ -1,9 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional
+import os
 
 import numpy as np
-
 from srcm_engine.domain import Domain
 from srcm_engine.conversion import ConversionParams, combined_mass
 from srcm_engine.reactions import HybridReactionSystem
@@ -12,9 +12,12 @@ from srcm_engine.pde import laplacian_1d, rk4_step
 from srcm_engine.diffusion import SSADiffusion
 from srcm_engine.core.gillespie_loop import gillespie_draw
 from srcm_engine.conversion.regime_utils import sufficient_pde_concentration_mask
+from contextlib import contextmanager
+from srcm_engine.results import SimulationResults
 
 PDETermsFn = Callable[[np.ndarray, Dict[str, float]], np.ndarray]
 # signature: pde_terms(C, rates) -> reaction-only dC/dt, shape (n_species, Npde)
+
 
 
 @dataclass
@@ -461,58 +464,185 @@ class SRCMEngine:
             species=self.reactions.species,
         )
 
+    # def run_repeats(
+    #         self,
+    #         initial_ssa: np.ndarray,
+    #         initial_pde: Optional[np.ndarray],
+    #         time: float,
+    #         dt: float,
+    #         repeats: int,
+    #         seed: int = 0,
+    #         progress: bool = True,
+    #     ):
+    #     """
+    #     Run multiple independent simulations and return mean SSA/PDE time series.
+
+    #     Parameters
+    #     ----------
+    #     progress : bool
+    #         If True, show a tqdm progress bar.
+    #     """
+    #     from srcm_engine.results import SimulationResults
+
+    #     if repeats <= 0:
+    #         raise ValueError("repeats must be > 0")
+
+    #     # Import tqdm only if needed (keeps core dependency optional-ish)
+    #     if progress:
+    #         try:
+    #             from tqdm.auto import tqdm
+    #         except ImportError:
+    #             tqdm = None
+    #             progress = False
+
+    #     # Run first simulation to get shapes + time vector
+    #     res0 = self.run(initial_ssa, initial_pde, time=time, dt=dt, seed=seed)
+
+    #     ssa_sum = res0.ssa.astype(float)
+    #     pde_sum = res0.pde.astype(float)
+
+    #     iterator = range(1, repeats)
+    #     if progress:
+    #         iterator = tqdm(
+    #             iterator,
+    #             total=repeats - 1,
+    #             desc="SRCM repeats",
+    #             unit="run",
+    #             dynamic_ncols=True,
+    #         )
+
+    #     # Remaining repeats
+    #     for r in iterator:
+    #         res_r = self.run(initial_ssa, initial_pde, time=time, dt=dt, seed=seed + r)
+    #         ssa_sum += res_r.ssa
+    #         pde_sum += res_r.pde
+
+    #     ssa_mean = ssa_sum / repeats
+    #     pde_mean = pde_sum / repeats
+
+    #     return SimulationResults(
+    #         time=res0.time,
+    #         ssa=ssa_mean,
+    #         pde=pde_mean,
+    #         domain=self.domain,
+    #         species=self.reactions.species,
+    #     )
+
+
     def run_repeats(
-            self,
-            initial_ssa: np.ndarray,
-            initial_pde: Optional[np.ndarray],
-            time: float,
-            dt: float,
-            repeats: int,
-            seed: int = 0,
-            progress: bool = True,
-        ):
+    self,
+    initial_ssa: np.ndarray,
+    initial_pde: Optional[np.ndarray],
+    time: float,
+    dt: float,
+    repeats: int,
+    seed: int = 0,
+    *,
+    parallel: bool = False,
+    n_jobs: int = -1,
+    prefer: str = "processes",
+    progress: bool = True,
+):
         """
         Run multiple independent simulations and return mean SSA/PDE time series.
 
-        Parameters
-        ----------
-        progress : bool
-            If True, show a tqdm progress bar.
+        parallel=True uses joblib to spread repeats across CPU cores.
+        n_jobs=-1 uses all available cores (often best to set to os.cpu_count()-1).
         """
-        from srcm_engine.results import SimulationResults
+   
 
         if repeats <= 0:
             raise ValueError("repeats must be > 0")
 
-        # Import tqdm only if needed (keeps core dependency optional-ish)
-        if progress:
-            try:
-                from tqdm.auto import tqdm
-            except ImportError:
-                tqdm = None
-                progress = False
-
-        # Run first simulation to get shapes + time vector
+        # First run locally for shapes/time vector
         res0 = self.run(initial_ssa, initial_pde, time=time, dt=dt, seed=seed)
-
         ssa_sum = res0.ssa.astype(float)
         pde_sum = res0.pde.astype(float)
 
-        iterator = range(1, repeats)
-        if progress:
-            iterator = tqdm(
-                iterator,
-                total=repeats - 1,
-                desc="SRCM repeats",
-                unit="run",
-                dynamic_ncols=True,
+        if repeats == 1:
+            return SimulationResults(
+                time=res0.time,
+                ssa=ssa_sum,
+                pde=pde_sum,
+                domain=self.domain,
+                species=self.reactions.species,
             )
 
-        # Remaining repeats
-        for r in iterator:
-            res_r = self.run(initial_ssa, initial_pde, time=time, dt=dt, seed=seed + r)
-            ssa_sum += res_r.ssa
-            pde_sum += res_r.pde
+        # -----------------------
+        # Serial repeats
+        # -----------------------
+        if not parallel:
+            iterator = range(1, repeats)
+
+            if progress:
+                try:
+                    from tqdm.auto import tqdm
+                    iterator = tqdm(
+                        iterator,
+                        total=repeats - 1,
+                        desc="SRCM repeats",
+                        unit="run",
+                        dynamic_ncols=True,
+                    )
+                except ImportError:
+                    pass  # no tqdm, fall back to plain range
+
+            for r in iterator:
+                res_r = self.run(initial_ssa, initial_pde, time=time, dt=dt, seed=seed + r)
+                ssa_sum += res_r.ssa
+                pde_sum += res_r.pde
+
+        # -----------------------
+        # Parallel repeats (joblib)
+        # -----------------------
+        else:
+            try:
+                from joblib import Parallel, delayed
+            except ImportError as e:
+                raise ImportError(
+                    "Parallel repeats requires joblib. Install with: pip install joblib"
+                ) from e
+
+            # tqdm optional
+            if progress:
+                try:
+                    from tqdm.auto import tqdm
+                except ImportError:
+                    tqdm = None
+                    progress = False
+
+            def one(r: int):
+                res = self.run(initial_ssa, initial_pde, time=time, dt=dt, seed=seed + r)
+                return res.ssa.astype(float), res.pde.astype(float)
+
+            tasks = (delayed(one)(r) for r in range(1, repeats))
+
+            # Stream results back as they complete (prevents huge RAM usage)
+            par = Parallel(n_jobs=n_jobs, prefer=prefer, return_as="generator")
+
+            if n_jobs == -1:
+                n_workers = os.cpu_count() or 1
+            else:
+                n_workers = n_jobs
+
+            print(f"Running SRCM repeats in parallel on {n_workers} core(s)")
+
+            # Stream results back as they complete
+            par = Parallel(n_jobs=n_jobs, prefer=prefer, return_as="generator")
+
+            results_iter = par(tasks)
+            if progress and tqdm is not None:
+                results_iter = tqdm(
+                    results_iter,
+                    total=repeats - 1,
+                    desc="SRCM repeats",
+                    unit="run",
+                    dynamic_ncols=True,
+                )
+
+            for ssa_r, pde_r in results_iter:
+                ssa_sum += ssa_r
+                pde_sum += pde_r
 
         ssa_mean = ssa_sum / repeats
         pde_mean = pde_sum / repeats
