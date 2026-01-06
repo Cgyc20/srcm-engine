@@ -1,5 +1,5 @@
-from .animate import AnimationConfig, animate_results
+from .animate import AnimationConfig, animate_results, plot_mass_time_series
 
 
 
-__all__ = ["AnimationConfig", "animate_results"]
+__all__ = ["AnimationConfig", "animate_results", "plot_mass_time_series"]
