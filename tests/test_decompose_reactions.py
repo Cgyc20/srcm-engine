@@ -448,6 +448,265 @@ class TestReactionDecomposition:
         assert hr_cd.state_change["C_A"] == -1
         assert hr_cd.state_change["D_B"] == -1
 
+        # ---------------------------------------------------------------------
+    # EXTRA STRESS TESTS (add below your existing ones inside the same class)
+    # ---------------------------------------------------------------------
+
+    def test_zero_order_three_species(self):
+        """∅ → A + 2B + 3C."""
+        reactions = HybridReactionSystem(species=["A", "B", "C"])
+
+        reactions.add_reaction_original({}, {"A": 1, "B": 2, "C": 3}, rate=1.2, rate_name="r0_ABC")
+
+        assert len(reactions.hybrid_reactions) == 1
+        hr = reactions.hybrid_reactions[0]
+
+        assert hr.reactants == {}
+        assert hr.products == {"D_A": 1, "D_B": 2, "D_C": 3}
+        assert hr.state_change == {"D_A": 1, "D_B": 2, "D_C": 3}
+
+        D = {"A": 0, "B": 0, "C": 0}
+        C = {"A": 0.0, "B": 0.0, "C": 0.0}
+        r = {"r0_ABC": 1.2}
+        h = 0.25
+        assert hr.propensity(D, C, r, h) == 1.2 * 0.25
+
+
+    def test_first_order_multi_products(self):
+        """A → 2B + C."""
+        reactions = HybridReactionSystem(species=["A", "B", "C"])
+
+        reactions.add_reaction_original({"A": 1}, {"B": 2, "C": 1}, rate=0.8, rate_name="r1_multi")
+
+        assert len(reactions.hybrid_reactions) == 1
+        hr = reactions.hybrid_reactions[0]
+
+        assert hr.reactants == {"D_A": 1}
+        assert hr.products == {"D_B": 2, "D_C": 1}
+        assert hr.state_change == {"D_A": -1, "D_B": 2, "D_C": 1}
+
+        D = {"A": 7, "B": 0, "C": 0}
+        C = {"A": 0.0, "B": 0.0, "C": 0.0}
+        r = {"r1_multi": 0.8}
+        h = 0.1
+        assert hr.propensity(D, C, r, h) == 0.8 * 7
+
+
+    def test_first_order_A_to_A_plus_B(self):
+        """A → A + B (net: +B)."""
+        reactions = HybridReactionSystem(species=["A", "B"])
+
+        reactions.add_reaction_original({"A": 1}, {"A": 1, "B": 1}, rate=0.33, rate_name="r_A_to_AB")
+
+        assert len(reactions.hybrid_reactions) == 1
+        hr = reactions.hybrid_reactions[0]
+
+        assert hr.reactants == {"D_A": 1}
+        assert hr.products == {"D_A": 1, "D_B": 1}
+        assert hr.state_change == {"D_A": 0, "D_B": 1}
+
+        D = {"A": 5, "B": 0}
+        C = {"A": 0.0, "B": 0.0}
+        r = {"r_A_to_AB": 0.33}
+        h = 0.1
+        assert hr.propensity(D, C, r, h) == 0.33 * 5
+
+
+    def test_homodimer_2A_to_A(self):
+        """2A → A (net: -1A)."""
+        reactions = HybridReactionSystem(species=["A"])
+
+        reactions.add_reaction_original({"A": 2}, {"A": 1}, rate=0.4, rate_name="r_2A_to_A")
+
+        assert len(reactions.hybrid_reactions) == 2
+        hr_dd, hr_dc = reactions.hybrid_reactions
+
+        # DD: 2D_A -> 1D_A, net -1
+        assert hr_dd.reactants == {"D_A": 2}
+        assert hr_dd.products == {"D_A": 1}
+        assert hr_dd.state_change == {"D_A": -1}
+
+        # DC: D_A + C_A -> C_A (preserve C), net -1 D_A
+        assert hr_dc.reactants == {"D_A": 1, "C_A": 1}
+        assert hr_dc.state_change["D_A"] == -1
+
+        D = {"A": 10}
+        C = {"A": 5.0}
+        r = {"r_2A_to_A": 0.4}
+        h = 0.2
+
+        expected_dd = 0.4 * 10 * 9 / 0.2
+        assert hr_dd.propensity(D, C, r, h) == expected_dd
+
+        expected_dc = 2.0 * 0.4 * 10 * 5.0 / 0.2
+        assert hr_dc.propensity(D, C, r, h) == expected_dc
+
+
+    def test_homodimer_2A_to_B_plus_C(self):
+        """2A → B + C (net: -2A +B +C)."""
+        reactions = HybridReactionSystem(species=["A", "B", "C"])
+
+        reactions.add_reaction_original({"A": 2}, {"B": 1, "C": 1}, rate=0.6, rate_name="r_2A_to_BC")
+
+        assert len(reactions.hybrid_reactions) == 2
+        hr_dd, hr_dc = reactions.hybrid_reactions
+
+        assert hr_dd.reactants == {"D_A": 2}
+        assert hr_dd.products == {"D_B": 1, "D_C": 1}
+        assert hr_dd.state_change == {"D_A": -2, "D_B": 1, "D_C": 1}
+
+        # Mixed channel should still create B,C and consume net A from D side
+        assert "D_A" in hr_dc.state_change
+        assert hr_dc.state_change["D_A"] < 0
+        assert hr_dc.state_change["D_B"] == 1
+        assert hr_dc.state_change["D_C"] == 1
+
+
+    def test_heterodimer_A_plus_B_to_A_plus_B(self):
+        """A + B → A + B (net zero)."""
+        reactions = HybridReactionSystem(species=["A", "B"])
+
+        reactions.add_reaction_original({"A": 1, "B": 1}, {"A": 1, "B": 1},
+                                        rate=0.75, rate_name="r_AB_to_AB")
+
+        assert len(reactions.hybrid_reactions) == 3
+        hr_dd, hr_dc, hr_cd = reactions.hybrid_reactions
+
+        # DD: D_A + D_B -> D_A + D_B (net zero, likely explicit zeros)
+        assert hr_dd.state_change.get("D_A", 0) == 0
+        assert hr_dd.state_change.get("D_B", 0) == 0
+
+        # DC: D_A + C_B -> D_A + C_B (C_B preserved, net zero)
+        assert hr_dc.reactants == {"D_A": 1, "C_B": 1}
+        assert hr_dc.state_change.get("D_A", 0) == 0
+        assert hr_dc.state_change.get("C_B", 0) == 0  # you may drop C zeros; accept either
+        # If you drop C zeros in state_change, this still passes:
+        # (because .get gives 0)
+
+        # CD: C_A + D_B -> C_A + D_B (C_A preserved, net zero)
+        assert hr_cd.reactants == {"C_A": 1, "D_B": 1}
+        assert hr_cd.state_change.get("C_A", 0) == 0
+        assert hr_cd.state_change.get("D_B", 0) == 0
+
+
+    def test_heterodimer_A_plus_B_to_B_plus_C(self):
+        """A + B → B + C (net: -A + C)."""
+        reactions = HybridReactionSystem(species=["A", "B", "C"])
+
+        reactions.add_reaction_original({"A": 1, "B": 1}, {"B": 1, "C": 1},
+                                        rate=0.9, rate_name="r_AB_to_BC")
+
+        assert len(reactions.hybrid_reactions) == 3
+        hr_dd, hr_dc, hr_cd = reactions.hybrid_reactions
+
+        # DD: D_A + D_B -> D_B + D_C
+        assert hr_dd.reactants == {"D_A": 1, "D_B": 1}
+        assert hr_dd.products == {"D_B": 1, "D_C": 1}
+        assert hr_dd.state_change["D_A"] == -1
+        assert hr_dd.state_change["D_C"] == 1
+
+        # DC: D_A + C_B -> C_B + D_C (B preserved as continuous)
+        assert hr_dc.reactants == {"D_A": 1, "C_B": 1}
+        assert hr_dc.state_change["D_A"] == -1
+        assert hr_dc.state_change["D_C"] == 1
+        # C_B should net to 0 (either omitted or explicitly 0)
+        assert hr_dc.state_change.get("C_B", 0) == 0
+
+        # CD: C_A + D_B -> D_B + D_C (A consumed in continuous form if not reproduced)
+        assert hr_cd.reactants == {"C_A": 1, "D_B": 1}
+        # A is not on RHS => C_A must be -1 (this distinguishes from the bug you fixed)
+        assert hr_cd.state_change["C_A"] == -1
+        assert hr_cd.state_change["D_C"] == 1
+
+
+    def test_heterodimer_catalytic_like_A_plus_B_to_A_plus_B_plus_C(self):
+        """A + B → A + B + C (net: +C)."""
+        reactions = HybridReactionSystem(species=["A", "B", "C"])
+
+        reactions.add_reaction_original({"A": 1, "B": 1}, {"A": 1, "B": 1, "C": 1},
+                                        rate=1.1, rate_name="r_cat")
+
+        assert len(reactions.hybrid_reactions) == 3
+        hr_dd, hr_dc, hr_cd = reactions.hybrid_reactions
+
+        # DD net should just create C
+        assert hr_dd.state_change.get("D_A", 0) == 0
+        assert hr_dd.state_change.get("D_B", 0) == 0
+        assert hr_dd.state_change["D_C"] == 1
+
+        # DC: D_A + C_B -> D_A + C_B + D_C (net +C, preserve C_B)
+        assert hr_dc.state_change.get("D_A", 0) == 0
+        assert hr_dc.state_change.get("C_B", 0) == 0
+        assert hr_dc.state_change["D_C"] == 1
+
+        # CD: C_A + D_B -> C_A + D_B + D_C (net +C, preserve C_A)
+        assert hr_cd.state_change.get("C_A", 0) == 0
+        assert hr_cd.state_change.get("D_B", 0) == 0
+        assert hr_cd.state_change["D_C"] == 1
+
+
+    def test_heterodimer_A_plus_B_to_A_plus_C_plus_D(self):
+        """A + B → A + C + D (net: -B + C + D). Tests preserve A in mixed channels."""
+        reactions = HybridReactionSystem(species=["A", "B", "C", "D"])
+
+        reactions.add_reaction_original({"A": 1, "B": 1}, {"A": 1, "C": 1, "D": 1},
+                                        rate=0.55, rate_name="r_AB_to_ACD")
+
+        assert len(reactions.hybrid_reactions) == 3
+        hr_dd, hr_dc, hr_cd = reactions.hybrid_reactions
+
+        # DD: net -B +C +D, A cancels
+        assert hr_dd.state_change.get("D_A", 0) == 0
+        assert hr_dd.state_change["D_B"] == -1
+        assert hr_dd.state_change["D_C"] == 1
+        assert hr_dd.state_change["D_D"] == 1
+
+        # DC: D_A + C_B channel, A cancels, B consumed (continuous), C,D produced
+        assert hr_dc.state_change.get("D_A", 0) == 0
+        assert hr_dc.state_change["C_B"] == -1
+        assert hr_dc.state_change["D_C"] == 1
+        assert hr_dc.state_change["D_D"] == 1
+
+        # CD: C_A + D_B channel, A should be preserved (since A is on RHS)
+        # so no C_A:-1 should remain in state_change
+        assert "C_A" not in hr_cd.state_change or hr_cd.state_change.get("C_A", 0) == 0
+        assert hr_cd.state_change["D_B"] == -1
+        assert hr_cd.state_change["D_C"] == 1
+        assert hr_cd.state_change["D_D"] == 1
+
+
+    def test_propensity_scaling_heterodimer_all_three_channels(self):
+        """Check /h scaling and correct factors for DD/DC/CD in heterodimer."""
+        reactions = HybridReactionSystem(species=["A", "B", "C"])
+
+        reactions.add_reaction_original({"A": 1, "B": 1}, {"C": 1},
+                                        rate=0.5, rate_name="r_scale")
+
+        hr_dd, hr_dc, hr_cd = reactions.hybrid_reactions
+
+        D = {"A": 4, "B": 6, "C": 0}
+        C = {"A": 1.5, "B": 2.5, "C": 0.0}
+        r = {"r_scale": 0.5}
+        h = 0.2
+
+        assert hr_dd.propensity(D, C, r, h) == 0.5 * 4 * 6 / 0.2
+        assert hr_dc.propensity(D, C, r, h) == 0.5 * 4 * 2.5 / 0.2
+        assert hr_cd.propensity(D, C, r, h) == 0.5 * 1.5 * 6 / 0.2
+
+
+    def test_labels_unique_across_many_reactions(self):
+        """Throw a bunch of reactions in and ensure all hybrid labels are unique."""
+        reactions = HybridReactionSystem(species=["A", "B", "C"])
+
+        reactions.add_reaction_original({}, {"A": 1}, rate=0.1, rate_name="r0")
+        reactions.add_reaction_original({"A": 1}, {"B": 1}, rate=0.2, rate_name="r1")
+        reactions.add_reaction_original({"A": 2}, {"C": 1}, rate=0.3, rate_name="r2")
+        reactions.add_reaction_original({"A": 1, "B": 1}, {"C": 1}, rate=0.4, rate_name="r3")
+        reactions.add_reaction_original({"A": 1, "B": 1}, {"A": 1, "C": 1}, rate=0.5, rate_name="r4")
+
+        labels = [hr.label for hr in reactions.hybrid_reactions]
+        assert len(labels) == len(set(labels))
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

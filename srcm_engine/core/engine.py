@@ -171,8 +171,17 @@ class SRCMEngine:
             block = base_block + rxn_idx
             start = block * K
 
-            consumes_C = getattr(hr, "consumes_continuous", False)
-            consumed_species = getattr(hr, "consumed_species", ())
+            # consumes_C = getattr(hr, "consumes_continuous", False)
+            # consumed_species = getattr(hr, "consumed_species", ())
+
+            # Infer continuous consumption from state_change (source of truth), added 7th jan 2026. (with new reaction system)
+            consumed_species = [
+                key.split("_", 1)[1]
+                for key, delta in hr.state_change.items()
+                if key.startswith("C_") and delta < 0
+            ]
+            consumes_C = (len(consumed_species) > 0)
+
 
             for i in range(K):
 
