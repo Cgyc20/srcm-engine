@@ -177,6 +177,7 @@ def build_engine():
         description="D^V -> 0",
     )
   
+    reactions.describe()
 
     engine = SRCMEngine(
         reactions=reactions,
