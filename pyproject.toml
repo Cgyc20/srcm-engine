@@ -6,7 +6,12 @@ authors = ["Cgyc20 <cgyc20@bath.ac.uk>"]
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = ">=3.12,<3.15"
+pyside6 = "^6.10.1"
+fastapi = "^0.128.0"
+uvicorn = "^0.40.0"
+pydantic = "^2.12.5"
+
 
 [project]
 name = "srcm_engine"
@@ -18,3 +23,9 @@ dependencies = [
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.gui.dependencies]
+pyside6 = { version = "^6.10.1", python = "<3.15" }
+
+[tool.poetry.scripts]
+app = "srcm_engine.api:main"
