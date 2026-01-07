@@ -36,6 +36,336 @@ class HybridReactionSystem:
         """
         self.pure_reactions.append({"reactants": reactants, "products": products, "rate": float(rate)})
 
+    def add_reaction_original(self, 
+                    reactants: Dict[str, int],
+                    products: Dict[str, int],
+                    rate: float,
+                    rate_name: Optional[str]=None
+                    ):
+        """
+        Add a macroscopic reaction AND automatically decompose into hybrid reactions.
+        """
+        self.pure_reactions.append({
+        "reactants": reactants, 
+        "products": products, 
+        "rate": float(rate) })
+
+        if rate_name is None:
+            rate_name = f"r_{len(self.pure_reactions)}"
+        
+        order = sum(reactants.values()) #The order of the reaction is the number of reacting molecules.
+
+        if order == 0:
+            self._decompose_zero_order(reactants, products, rate_name)
+        elif order == 1:
+            self._decompose_first_order(reactants, products, rate_name)
+        elif order == 2:
+            self._decompose_second_order(reactants, products, rate_name)
+        else:
+            raise NotImplementedError(f"Reactions of order {order} not yet supported")
+        
+
+    def _decompose_zero_order(self, reactants: Dict[str, int], products: Dict[str, int], rate_name: str):
+        """
+        Zero-order reaction: ∅ → products
+        Single hybrid reaction creating discrete products.
+        Propensity: r * h (rate times compartment volume)
+        """
+        # Compute state change: just add products as discrete
+        state_change = {}
+        for species, count in products.items():
+            state_change[f"D_{species}"] = count
+        
+        # Build hybrid reactants/products (discrete)
+        hybrid_reactants = {}
+        hybrid_products = {f"D_{species}": count for species, count in products.items()}
+        
+        # Build propensity: zero-order is r * h
+        def propensity(D, C, r, h):
+            return r[rate_name] * h
+        
+        # Build label and description
+        reactant_str = "∅"
+        product_str = " + ".join([f"{count}D_{sp}" if count > 1 else f"D_{sp}" 
+                                for sp, count in products.items()])
+        label = f"{rate_name}_zero"
+        description = f"{reactant_str} → {product_str}"
+        
+        self.add_hybrid_reaction(
+            reactants=hybrid_reactants,
+            products=hybrid_products,
+            propensity=propensity,
+            state_change=state_change,
+            label=label,
+            description=description
+        )
+
+
+    def _decompose_first_order(self, reactants: Dict[str, int], products: Dict[str, int], rate_name: str):
+        """
+        First-order reaction: A → products
+        Single hybrid reaction: D_A → products
+        Propensity: r * D_A
+        """
+        # Get the single reactant species
+        assert len(reactants) == 1, "First-order must have exactly one reactant species"
+        species = list(reactants.keys())[0]
+        reactant_count = reactants[species]
+        assert reactant_count == 1, "First-order must have stoichiometry of 1"
+        
+        # Compute state change
+        state_change = {f"D_{species}": -1}  # Consume one discrete
+        for prod_sp, prod_count in products.items():
+            key = f"D_{prod_sp}"
+            state_change[key] = state_change.get(key, 0) + prod_count
+        
+        # Build hybrid reactants/products
+        hybrid_reactants = {f"D_{species}": 1}
+        hybrid_products = {f"D_{sp}": count for sp, count in products.items()}
+        
+        # Build propensity: first-order is r * D_A
+        def propensity(D, C, r, h):
+            return r[rate_name] * D[species]
+        
+        # Build label and description
+        product_str = " + ".join([f"{count}D_{sp}" if count > 1 else f"D_{sp}" 
+                                for sp, count in products.items()]) if products else "∅"
+        label = f"{rate_name}_D"
+        description = f"D_{species} → {product_str}"
+        
+        self.add_hybrid_reaction(
+            reactants=hybrid_reactants,
+            products=hybrid_products,
+            propensity=propensity,
+            state_change=state_change,
+            label=label,
+            description=description
+        )
+
+
+    def _decompose_second_order(self, reactants: Dict[str, int], products: Dict[str, int], rate_name: str):
+        """
+        Second-order reaction: A + B → products or 2A → products
+        
+        Generates 2-3 hybrid reactions depending on whether it's homodimerization:
+        
+        Homodimerization (A + A):
+            1. D_A + D_A: r * D_A * (D_A - 1) / h
+            2. D_A + C_A: 2 * r * D_A * C_A / h  (factor 2!)
+        
+        Heterodimerization (A + B):
+            1. D_A + D_B: r * D_A * D_B / h
+            2. D_A + C_B: r * D_A * C_B / h
+            3. C_A + D_B: r * C_A * D_B / h
+        """
+        # Check if homodimerization
+        if len(reactants) == 1:
+            # Homodimerization: 2A → products
+            species = list(reactants.keys())[0]
+            assert reactants[species] == 2, "Homodimerization must have stoichiometry of 2"
+            self._add_homodimer_reactions(species, products, rate_name)
+        else:
+            # Heterodimerization: A + B → products
+            assert len(reactants) == 2, "Second-order must have 1 or 2 species"
+            species_list = list(reactants.keys())
+            assert all(reactants[sp] == 1 for sp in species_list), "Hetero must have stoichiometry 1 each"
+            self._add_heterodimer_reactions(species_list[0], species_list[1], products, rate_name)
+
+
+    def _add_homodimer_reactions(self, species: str, products: Dict[str, int], rate_name: str):
+        """
+        Add hybrid reactions for homodimerization: 2A → products
+
+        1. D + D: r * D_A * (D_A - 1) / h,     state_change includes -2 of reactant
+        2. D + C: 2 * r * D_A * C_A / h,       only D is changed by the net stoichiometric delta,
+                                            C is preserved.
+        """
+        # --- Reaction 1: D + D (unchanged) ---
+        state_change_DD = {f"D_{species}": -2}
+        for prod_sp, prod_count in products.items():
+            key = f"D_{prod_sp}"
+            state_change_DD[key] = state_change_DD.get(key, 0) + prod_count
+
+        hybrid_reactants_DD = {f"D_{species}": 2}
+        hybrid_products_DD = {f"D_{sp}": count for sp, count in products.items()}
+
+        def propensity_DD(D, C, r, h):
+            D_val = D[species]
+            return r[rate_name] * D_val * (D_val - 1) / h
+
+        product_str = " + ".join(
+            [f"{count}D_{sp}" if count > 1 else f"D_{sp}" for sp, count in products.items()]
+        ) if products else "∅"
+
+        self.add_hybrid_reaction(
+            reactants=hybrid_reactants_DD,
+            products=hybrid_products_DD,
+            propensity=propensity_DD,
+            state_change=state_change_DD,
+            label=f"{rate_name}_DD",
+            description=f"D_{species} + D_{species} → {product_str}"
+        )
+
+        # --- Reaction 2: D + C, preserve C, adjust only D by net stoichiometric delta ---
+
+        # total reactant stoichiometry of this species (2A on LHS)
+        reactant_stoich = 2
+
+        # total product stoichiometry for this species (e.g. 3A on RHS)
+        product_stoich = products.get(species, 0)
+
+        # net change in number of A molecules
+        delta = product_stoich - reactant_stoich  # e.g. 3 - 2 = +1 for 2A -> 3A
+
+        # state change: only D_A is modified by delta, C_A is preserved
+        state_change_DC = {f"D_{species}": delta}
+
+        for prod_sp, prod_count in products.items():
+            if prod_sp == species:
+                # A on RHS: cancel against the one A that was left as continuous
+                # so ignore or adjust D_A if you want *only* the net D change
+                continue
+            key = f"D_{prod_sp}"
+            state_change_DC[key] = state_change_DC.get(key, 0) + prod_count
+        # C_{species} does not change, so no entry for C_{species} in state_change_DC
+
+        # hybrid reactants: D_A + C_A
+        hybrid_reactants_DC = {f"D_{species}": 1, f"C_{species}": 1}
+
+        # hybrid products: start from reactants, then add delta to D_A
+        # D_A: 1 + delta, C_A: 1
+        hybrid_products_DC = {f"D_{species}": 1 + delta, f"C_{species}": 1}
+
+        # propensity unchanged: 2 * r * D_A * C_A / h
+        def propensity_DC(D, C, r, h):
+            return 2.0 * r[rate_name] * D[species] * C[species] / h
+
+        self.add_hybrid_reaction(
+            reactants=hybrid_reactants_DC,
+            products=hybrid_products_DC,
+            propensity=propensity_DC,
+            state_change=state_change_DC,
+            label=f"{rate_name}_DC",
+            description = (
+                    f"D_{species} + C_{species} → "
+                    f"{hybrid_products_DC['D_' + species]}D_{species} + C_{species} (factor 2, preserve C)"
+                )
+
+        )
+
+
+    def _add_heterodimer_reactions(self, species_A: str, species_B: str, products: Dict[str, int], rate_name: str):
+        """
+        Add hybrid reactions for heterodimerization: A + B → products
+        
+        1. D_A + D_B: r * D_A * D_B / h
+        2. D_A + C_B: r * D_A * C_B / h
+        3. C_A + D_B: r * C_A * D_B / h
+        """
+        product_str = " + ".join([f"{count}D_{sp}" if count > 1 else f"D_{sp}" 
+                                for sp, count in products.items()]) if products else "∅"
+        
+        # --- Reaction 1: D_A + D_B ---
+        state_change_DD = {f"D_{species_A}": -1, f"D_{species_B}": -1}
+        for prod_sp, prod_count in products.items():
+            key = f"D_{prod_sp}"
+            state_change_DD[key] = state_change_DD.get(key, 0) + prod_count
+        
+        hybrid_reactants_DD = {f"D_{species_A}": 1, f"D_{species_B}": 1}
+        hybrid_products_DD = {f"D_{sp}": count for sp, count in products.items()}
+        
+        def propensity_DD(D, C, r, h):
+            return r[rate_name] * D[species_A] * D[species_B] / h
+        
+        self.add_hybrid_reaction(
+            reactants=hybrid_reactants_DD,
+            products=hybrid_products_DD,
+            propensity=propensity_DD,
+            state_change=state_change_DD,
+            label=f"{rate_name}_DD",
+            description=f"D_{species_A} + D_{species_B} → {product_str}"
+        )
+
+        def _state_change_for_channel(channel_reactants: Dict[str, int], products: Dict[str, int]) -> Dict[str, int]:
+            # start by consuming the channel reactants
+            sc: Dict[str, int] = {k: -v for k, v in channel_reactants.items()}
+
+            # map species -> prefix used in reactants for this channel ("C" or "D")
+            reactant_prefix: Dict[str, str] = {}
+            for token in channel_reactants:
+                prefix, sp = token.split("_", 1)
+                reactant_prefix[sp] = prefix
+
+            # add products:
+            # - if species is continuous in reactants, credit back to C_species
+            # - else, credit to D_species
+            for sp, count in products.items():
+                prefix = reactant_prefix.get(sp, "D")
+                key = f"{prefix}_{sp}"
+                sc[key] = sc.get(key, 0) + count
+
+            # IMPORTANT: drop only *continuous* zeros, keep discrete zeros (tests expect D_A: 0)
+            for k in list(sc.keys()):
+                if k.startswith("C_") and sc[k] == 0:
+                    del sc[k]
+
+            return sc
+
+        
+        # --- Reaction 2: D_A + C_B ---
+        hybrid_reactants_DC = {f"D_{species_A}": 1, f"C_{species_B}": 1}
+        state_change_DC = _state_change_for_channel(hybrid_reactants_DC, products)
+
+        # Products: preserve continuous species that are continuous reactants in this channel
+        hybrid_products_DC: Dict[str, int] = {}
+        for token, v in hybrid_reactants_DC.items():
+            hybrid_products_DC[token] = v
+        for sp, count in products.items():
+            # if B is continuous reactant, keep it continuous; otherwise discrete
+            if sp == species_B:
+                hybrid_products_DC[f"C_{sp}"] = hybrid_products_DC.get(f"C_{sp}", 0) + count
+            else:
+                hybrid_products_DC[f"D_{sp}"] = hybrid_products_DC.get(f"D_{sp}", 0) + count
+
+        def propensity_DC(D, C, r, h):
+            return r[rate_name] * D[species_A] * C[species_B] / h
+
+        self.add_hybrid_reaction(
+            reactants=hybrid_reactants_DC,
+            products=hybrid_products_DC,
+            propensity=propensity_DC,
+            state_change=state_change_DC,
+            label=f"{rate_name}_DC",
+            description=f"D_{species_A} + C_{species_B} → {product_str}"
+        )
+
+        # --- Reaction 3: C_A + D_B ---
+        hybrid_reactants_CD = {f"C_{species_A}": 1, f"D_{species_B}": 1}
+        state_change_CD = _state_change_for_channel(hybrid_reactants_CD, products)
+
+        hybrid_products_CD: Dict[str, int] = {}
+        for token, v in hybrid_reactants_CD.items():
+            hybrid_products_CD[token] = v
+        for sp, count in products.items():
+            if sp == species_A:
+                hybrid_products_CD[f"C_{sp}"] = hybrid_products_CD.get(f"C_{sp}", 0) + count
+            else:
+                hybrid_products_CD[f"D_{sp}"] = hybrid_products_CD.get(f"D_{sp}", 0) + count
+
+        def propensity_CD(D, C, r, h):
+            return r[rate_name] * C[species_A] * D[species_B] / h
+
+        self.add_hybrid_reaction(
+            reactants=hybrid_reactants_CD,
+            products=hybrid_products_CD,
+            propensity=propensity_CD,
+            state_change=state_change_CD,
+            label=f"{rate_name}_CD",
+            description=f"C_{species_A} + D_{species_B} → {product_str}"
+        )
+
+
+
     def add_hybrid_reaction(
         self,
         reactants: Dict[str, int],

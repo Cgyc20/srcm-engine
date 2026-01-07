@@ -99,6 +99,8 @@ def build_engine():
     reactions.add_reaction({"U": 1, "V": 1}, {"V": 1}, rate=bar_r_2)    # U + V -> V
     reactions.add_reaction({"V": 1}, {}, rate=bar_r_3)                  # V -> 0
 
+
+    reactions.add_reaction_original({"V": 1}, {}, rate=bar_r_3)  
     # --- Reaction 1
     reactions.add_hybrid_reaction(
         reactants={"D_U": 2},
