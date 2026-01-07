@@ -1,0 +1,23 @@
+{
+  "name": "Turing_hybrid_bump",
+  "version": 1,
+  "model": {
+    "species": ["U", "V"],
+    "domain": { "L": 1.0, "K": 8, "pde_multiple": 4, "boundary": "zero-flux" },
+    "diffusion": { "U": 0.002782559, "V": 0.0687332073 },
+    "conversion": { "threshold": 10, "rate": 1.0 },
+    "rates": { "r_11": 0.002, "r_12": 0.002, "r_2": 0.004, "r_3": 0.6 },
+    "pde_code": "r['r_11'] * U**2 - r['r_2'] * U * V,\n r['r_12'] * U**2 - r['r_3'] * V",
+    "ssa_raw": "U + U -> U + U + U ; r_11\nU + U -> U + U + V ; r_12\nU + V -> V ; r_2\nV -> ; r_3"
+  },
+  "run": { "total_time": 100.0, "dt": 0.001, "repeats": 100, "parallel": true },
+  "initial_conditions": {
+    "ic_type": "SSA (Particles)",
+    "ic_mode": "Generated (Turing bump)"
+  },
+  "extras": {
+    "omega": 500,
+    "perturbation_amplitude": 0.07,
+    "n_compartments": 8
+  }
+}
