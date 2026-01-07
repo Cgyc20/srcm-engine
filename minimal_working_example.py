@@ -65,7 +65,7 @@ meta.update({
     "seed": int(seed),
 })
 
-out_npz = "ab_switch_mean.npz"
+out_npz = "data/ab_switch_mean.npz"
 save_npz(res, out_npz, meta=meta)
 print("Saved:", out_npz)
 
