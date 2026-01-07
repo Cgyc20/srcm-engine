@@ -1,7 +1,9 @@
 # SRCM Engine
 
 **SRCM Engine** is a Python package for simulating **spatial reaction–diffusion systems**
-using a **hybrid stochastic–continuum (SSA–PDE)** framework.
+using a **hybrid stochastic–continuum (SSA–PDE)** framework. This is called the **Spatial regime conversion method**, a method co-authored by Myself (Charles Cameron), Professor Kit Yates and Dr Cameron Smith. This has been the major component of my PhD research at the University of Bath.
+
+This is a Hybrid framework which combined PDE's with stochastic compartment method. This allows the system to switch between either framework dynamically across the spatial domain depending on local particle counts. Please refer to the paper **Cameron, C. G., Smith, C. A., & Yates, C. A. (2025). The Spatial Regime Conversion Method. Mathematics, 13(21), 3406. https://doi.org/10.3390/math13213406Z** for more reading.
 
 It is designed for systems in which:
 - particle numbers may be low in some regions (requiring stochastic simulation),
@@ -11,6 +13,7 @@ It is designed for systems in which:
 SRCM Engine automatically couples **discrete stochastic reactions** with **continuous diffusion**
 on a spatial domain, without requiring users to manually write hybrid reaction channels.
 
+![Schematic](figures/schematic.png)
 ---
 
 ## 1. Motivation
