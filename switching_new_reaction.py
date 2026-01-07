@@ -125,7 +125,7 @@ def main():
         init_pde,
         time=meta["total_time"],
         dt=meta["dt"],
-        repeats=100,
+        repeats=1000,
         seed=1,
         parallel=True,
         n_jobs=-1,

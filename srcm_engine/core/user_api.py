@@ -58,7 +58,14 @@ class HybridModel:
         if len(set(self.species)) != len(self.species):
             raise ValueError("species must be unique")
 
+        self._domain = None
+        self._conversion = None
+        self._diffusion_rates = None   # ✅ add this
+        self._rates = None             # ✅ add this
+        self._engine = None            # ✅ add this
+
         self._reactions = HybridReactionSystem(species=list(self.species))
+
 
     # ------------------------------------------------------------------
     # configuration
@@ -204,6 +211,10 @@ class HybridModel:
         seed: int = 0,
     ):
         self._check_ic(init_ssa, init_pde)
+
+        if self._engine is None:
+            raise RuntimeError("Model not built yet. Call build(rates=...) first.")
+
         return self._engine.run(
             initial_ssa=init_ssa,
             initial_pde=init_pde,
@@ -211,6 +222,7 @@ class HybridModel:
             dt=float(dt),
             seed=int(seed),
         )
+
 
     def run_repeats(
         self,
@@ -227,6 +239,9 @@ class HybridModel:
         prefer: str = "processes",
     ):
         self._check_ic(init_ssa, init_pde)
+        if self._engine is None:
+            raise RuntimeError("Model not built yet. Call build(rates=...) first.")
+
         return self._engine.run_repeats(
             initial_ssa=init_ssa,
             initial_pde=init_pde,
@@ -240,6 +255,45 @@ class HybridModel:
             progress=bool(progress),
         )
 
+
+    def metadata(self) -> dict:
+        if self._engine is None:
+            raise RuntimeError("Model not built yet")
+
+        d = self._domain
+        if d is None:
+            raise RuntimeError("Domain not configured")
+
+        diffusion = dict(self._diffusion_rates) if self._diffusion_rates is not None else None
+        conversion = self._conversion
+        rates = dict(self._rates) if self._rates is not None else None
+
+        return {
+            "model": "SRCM Hybrid Model",
+            "species": list(self.species),
+
+            # domain
+            "L": float(d.length),
+            "K": int(d.K),
+            "pde_multiple": int(d.pde_multiple),
+            "boundary": str(d.boundary),
+
+            # diffusion
+            "diffusion_rates": diffusion,
+
+            # conversion
+            "threshold_particles": int(conversion.threshold) if conversion is not None else None,
+            "conversion_rate": float(conversion.rate) if conversion is not None else None,
+
+            # reactions
+            "reaction_rates": rates,
+            "hybrid_labels": self.hybrid_labels(),
+        }
+
+
+
+
+
     # ------------------------------------------------------------------
     # inspection
     # ------------------------------------------------------------------
@@ -252,6 +306,7 @@ class HybridModel:
     def hybrid_labels(self) -> List[str]:
         return [hr.label for hr in self._reactions.hybrid_reactions]
     
+
 
         # ------------------------------------------------------------------
     # compatibility + convenience
