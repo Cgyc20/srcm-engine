@@ -52,6 +52,18 @@ class SRCMEngine:
         # Useful mappings
         self._sp_to_idx = {sp: i for i, sp in enumerate(self.reactions.species)}
 
+        # Precompute more values
+        self._gamma = float(self.conversion.rate)
+        self._h_squared = self.domain.h ** 2
+        self._dx_squared = self.domain.dx ** 2
+        
+        # Precompute diffusion coefficients array
+        self._D_array = np.array([self.diffusion_rates[sp] 
+                                for sp in self.reactions.species])
+        
+        # Precompute jump rates array
+        self._jump_rates_array = self._D_array / self._h_squared
+
     # ------------------------------------------------------------------
     # PDE RHS: diffusion + reaction terms
     # ------------------------------------------------------------------
