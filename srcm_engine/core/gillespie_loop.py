@@ -1,45 +1,25 @@
 from __future__ import annotations
 import numpy as np
 
-
-def gillespie_draw(propensities: np.ndarray, rng: np.random.Generator, cumulative: np.ndarray | None = None):
-    """
-    Standard Gillespie draw.
-
-    Parameters
-    ----------
-    propensities : np.ndarray
-        1D array of nonnegative propensities (a_j).
-    rng : np.random.Generator
-        Numpy random generator.
-    cumulative : np.ndarray | None
-        Optional preallocated array to store cumulative sum (same shape as propensities).
-        If provided, will be written in-place.
-
-    Returns
-    -------
-    tau : float
-        Time to next event. If total propensity = 0, returns np.inf.
-    idx : int
-        Index of event channel. If total propensity = 0, returns -1.
-    """
+def gillespie_draw(
+    propensities: np.ndarray,
+    rng: np.random.Generator,
+    cumulative: np.ndarray | None = None,
+    *,
+    check_negative: bool = False,
+):
     if propensities.ndim != 1:
         raise ValueError("propensities must be a 1D array")
 
-    if np.any(propensities < 0):
-        j = int(np.where(propensities < 0)[0][0])
-        raise ValueError(f"propensities must be nonnegative: idx={j}, val={propensities[j]}")
+    # Debug-only: avoid scanning every event in production
+    if check_negative:
+        # min() is one pass; any(<0) is also one pass, but min is slightly simpler
+        mn = float(propensities.min(initial=0.0))
+        if mn < 0.0:
+            j = int(np.argmin(propensities))
+            raise ValueError(f"propensities must be nonnegative: idx={j}, val={propensities[j]}")
 
-
-    a0 = float(np.sum(propensities))
-    if a0 == 0.0:
-        return np.inf, -1
-
-    u1 = rng.random()
-    u2 = rng.random()
-
-    tau = (1.0 / a0) * np.log(1.0 / u1)
-
+    # Preallocate cum array if not provided (still allocates, but you can pass one from caller)
     if cumulative is None:
         cumulative = np.cumsum(propensities)
     else:
@@ -47,9 +27,11 @@ def gillespie_draw(propensities: np.ndarray, rng: np.random.Generator, cumulativ
             raise ValueError("cumulative must have same shape as propensities")
         np.cumsum(propensities, out=cumulative)
 
-    idx = int(np.searchsorted(cumulative, u2 * a0))
-    # safety clamp (rare floating edge cases)
-    # if idx >= propensities.size:
-    #     idx = propensities.size - 1
+    a0 = float(cumulative[-1])
+    if a0 <= 0.0:
+        return np.inf, -1
 
+    u1, u2 = rng.random(2)
+    tau = np.log(1.0 / u1) / a0
+    idx = int(np.searchsorted(cumulative, u2 * a0, side="left"))
     return tau, idx
