@@ -207,7 +207,14 @@ def load_npz(path: PathLike) -> Tuple[SimulationResults, Dict[str, Any]]:
     """
     data = np.load(str(path), allow_pickle=True)
 
-    species = [str(s) for s in data["species"].tolist()]
+    if "species" in data.files:
+        species = [str(s) for s in data["species"].tolist()]
+    else:
+        # sensible fallback for legacy/SSA-only files
+        n_species = int(data["ssa"].shape[0]) if "ssa" in data.files else 2
+        # if you know your names, hardcode them:
+        species = ["A", "B"] if n_species == 2 else [f"S{i}" for i in range(n_species)]
+
 
     domain = Domain(
         length=float(data["domain_length"]),

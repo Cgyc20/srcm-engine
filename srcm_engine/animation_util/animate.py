@@ -11,6 +11,185 @@ from matplotlib import gridspec
 
 from ..results import SimulationResults
 
+from typing import Optional
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
+def _map_frames_by_time(t_ref: np.ndarray, t_other: np.ndarray) -> np.ndarray:
+    """
+    For each time in t_ref, pick nearest index in t_other.
+    Assumes both are 1D increasing.
+    """
+    idx = np.searchsorted(t_other, t_ref)
+    idx = np.clip(idx, 1, len(t_other) - 1)
+    left = idx - 1
+    right = idx
+    choose_right = (np.abs(t_other[right] - t_ref) < np.abs(t_other[left] - t_ref))
+    return np.where(choose_right, right, left)
+
+
+def animate_overlay(
+    res_main: SimulationResults,
+    res_overlay: SimulationResults,
+    *,
+    cfg: Optional[AnimationConfig] = None,
+    label_main: str = "Hybrid",
+    label_overlay: str = "SSA",
+):
+    """
+    Overlay res_overlay on top of res_main.
+
+    Assumptions for clean overlay:
+    - Same domain length L, same K, same pde_multiple (or at least same Npde)
+    - Same species ordering
+    - Times can differ; we time-map overlay -> main via nearest time.
+    """
+    if cfg is None:
+        cfg = AnimationConfig()
+
+    _validate_two_species(res_main.species)
+    _validate_two_species(res_overlay.species)
+
+    if list(res_main.species) != list(res_overlay.species):
+        raise ValueError(f"Species mismatch: {res_main.species} vs {res_overlay.species}")
+
+    # Basic grid compatibility checks
+    if (res_main.domain.length != res_overlay.domain.length) or (res_main.domain.n_ssa != res_overlay.domain.n_ssa):
+        raise ValueError("Domain mismatch: need same length and same n_ssa (K) for overlay.")
+
+    colors = setup_cinematic_style()
+
+    # Main data
+    time = res_main.time
+    ssa = res_main.ssa
+    pde = res_main.pde
+
+    n_species, K, T = ssa.shape
+    _, Npde, _ = pde.shape
+
+    h = float(res_main.domain.h)
+    dx = float(res_main.domain.dx)
+    pde_multiple = int(res_main.domain.pde_multiple)
+    L = float(res_main.domain.length)
+
+    # Overlay data (mapped in time)
+    time2 = res_overlay.time
+    ssa2 = res_overlay.ssa
+    pde2 = res_overlay.pde
+
+    # map overlay frames to main frames
+    tmap = _map_frames_by_time(time, time2)
+
+    # Coordinates scaled
+    ssa_x = (np.arange(K) * h) / L
+    pde_x = (np.linspace(0.0, L, Npde)) / L
+    bar_w = h / L
+
+    # Concentrations
+    ssa_conc = ssa.astype(float) / h
+    ssa_on_pde = ssa_to_concentration_on_pde_grid(ssa.astype(float), h, pde_multiple)
+    combined = pde + ssa_on_pde
+
+    # Overlay combined (SSA-only usually has pde=0, but we support nonzero)
+    ssa2_on_pde = ssa_to_concentration_on_pde_grid(ssa2.astype(float), h, pde_multiple)
+    combined2 = pde2 + ssa2_on_pde
+
+    max_conc = float(np.max([combined.max(), combined2.max()]))
+    if not np.isfinite(max_conc) or max_conc <= 0:
+        max_conc = 1.0
+
+    # Figure (reuse your “single” main panel style for simplicity)
+    fig = plt.figure(figsize=(16, 9), facecolor=colors["background"])
+    ax = fig.add_subplot(111)
+    ax.set_facecolor(colors["background"])
+    ax.grid(True, alpha=0.2, color=colors["grid"], linestyle="-", linewidth=0.5)
+    ax.tick_params(colors=colors["text"])
+
+    # Bars: MAIN SSA
+    bar_A = ax.bar(
+        ssa_x, ssa_conc[0, :, 0],
+        width=bar_w, align="edge",
+        color=_species_light_color(colors, 0), alpha=0.75,
+        edgecolor=_species_color(colors, 0), linewidth=0.5,
+        label=f"{label_main} SSA {res_main.species[0]}",
+    )
+    bar_B = ax.bar(
+        ssa_x, ssa_conc[1, :, 0],
+        width=bar_w, align="edge",
+        color=_species_light_color(colors, 1), alpha=0.75,
+        edgecolor=_species_color(colors, 1), linewidth=0.5,
+        label=f"{label_main} SSA {res_main.species[1]}",
+    )
+
+    # Lines: MAIN combined (solid)
+    line_main_A, = ax.plot(
+        pde_x, combined[0, :, 0],
+        color=_species_color(colors, 0), linewidth=3.0,
+        label=f"{label_main} combined {res_main.species[0]}",
+    )
+    line_main_B, = ax.plot(
+        pde_x, combined[1, :, 0],
+        color=_species_color(colors, 1), linewidth=3.0,
+        label=f"{label_main} combined {res_main.species[1]}",
+    )
+
+    # Lines: OVERLAY combined (dashed)
+    line_ov_A, = ax.plot(
+        pde_x, combined2[0, :, tmap[0]],
+        color=_species_color(colors, 0), linestyle="--", linewidth=3.0, alpha=0.9,
+        label=f"{label_overlay} combined {res_main.species[0]}",
+    )
+    line_ov_B, = ax.plot(
+        pde_x, combined2[1, :, tmap[0]],
+        color=_species_color(colors, 1), linestyle="--", linewidth=3.0, alpha=0.9,
+        label=f"{label_overlay} combined {res_main.species[1]}",
+    )
+
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, max_conc * 1.15)
+    ax.set_xlabel("Scaled Domain [0,1]", fontsize=13, color=colors["text"])
+    ax.set_ylabel("Concentration", fontsize=13, color=colors["text"])
+    ax.set_title(cfg.title, fontsize=18, color=colors["text"], fontweight="bold")
+
+    leg = ax.legend(loc="upper right", framealpha=0.9, facecolor=colors["background"], edgecolor=colors["grid"], fontsize=10)
+    for t in leg.get_texts():
+        t.set_color(colors["text"])
+
+    time_text = ax.text(
+        0.02, 0.95, "", transform=ax.transAxes,
+        fontsize=12, color=colors["text"], fontweight="bold",
+        bbox=dict(boxstyle="round,pad=0.45", facecolor=colors["background"], edgecolor=colors["grid"], alpha=0.9)
+    )
+
+    frames = list(range(0, T, max(1, int(cfg.stride))))
+
+    def update(frame_idx: int):
+        # Bars = MAIN SSA
+        for b, hgt in zip(bar_A, ssa_conc[0, :, frame_idx]):
+            b.set_height(float(hgt))
+        for b, hgt in zip(bar_B, ssa_conc[1, :, frame_idx]):
+            b.set_height(float(hgt))
+
+        # MAIN combined
+        line_main_A.set_ydata(combined[0, :, frame_idx])
+        line_main_B.set_ydata(combined[1, :, frame_idx])
+
+        # OVERLAY combined (mapped time index)
+        j = int(tmap[frame_idx])
+        line_ov_A.set_ydata(combined2[0, :, j])
+        line_ov_B.set_ydata(combined2[1, :, j])
+
+        time_text.set_text(f"t = {time[frame_idx]:.4g}\nmain={frame_idx}/{T-1}  overlay={j}/{len(time2)-1}")
+
+        return list(bar_A) + list(bar_B) + [line_main_A, line_main_B, line_ov_A, line_ov_B, time_text]
+
+    ani = FuncAnimation(fig, update, frames=frames, interval=int(cfg.interval_ms), blit=bool(cfg.blit), repeat=True)
+    plt.tight_layout()
+    plt.show()
+    return ani
+
+
 
 # ------------------------------------------------------------
 # Styling helpers
