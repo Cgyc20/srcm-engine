@@ -517,3 +517,15 @@ class HybridReactionSystem:
                     if hr.description:
                         print(f"     Info     : {hr.description}")
                     print()
+    def get_reactions_metadata(self) -> List[Dict[str, Any]]:
+        """Returns the macroscopic reaction list, removing non-serializable objects like slices."""
+        meta_list = []
+        for rxn in self.pure_reactions:
+            # We copy the dict but skip 'hybrid_slice' which isn't useful for JSON
+            meta_list.append({
+                "reactants": rxn.get("reactants"),
+                "products": rxn.get("products"),
+                "rate": rxn.get("rate"),
+                "rate_name": rxn.get("rate_name")
+            })
+        return meta_list
