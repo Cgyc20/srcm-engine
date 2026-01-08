@@ -452,6 +452,7 @@ class SRCMEngine:
 
         while t0 < t1:
             # masses + masks
+            print(t0)
             comb, pde_mass = combined_mass(state.ssa, state.pde, self.domain.pde_multiple, self.domain.dx)
             exceeds = self.conversion.exceeds_threshold_mask(comb)
             sufficient = sufficient_pde_concentration_mask(state.pde, self.domain.pde_multiple, self.domain.h)
