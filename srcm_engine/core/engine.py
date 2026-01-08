@@ -55,22 +55,36 @@ class SRCMEngine:
     # ------------------------------------------------------------------
     # PDE RHS: diffusion + reaction terms
     # ------------------------------------------------------------------
+    # def pde_rhs(self, C: np.ndarray, t: float) -> np.ndarray:
+    #     """
+    #     C shape: (n_species, Npde)
+    #     returns dC/dt shape: (n_species, Npde)
+    #     """
+    #     n_species, Npde = C.shape
+    #     out = np.zeros_like(C, dtype=float)
+
+    #     # Diffusion part: (D/dx^2) * L @ C_s
+    #     dx2 = self.domain.dx ** 2
+    #     for sp, s_idx in self._sp_to_idx.items():
+    #         D = float(self.diffusion_rates[sp])
+    #         out[s_idx, :] = (D / dx2) * (self._L @ C[s_idx, :])
+
+    #     # Reaction part (macroscopic)
+    #     out += self.pde_reaction_terms(C, self.reaction_rates)
+    #     return out
+
     def pde_rhs(self, C: np.ndarray, t: float) -> np.ndarray:
-        """
-        C shape: (n_species, Npde)
-        returns dC/dt shape: (n_species, Npde)
-        """
+        """Vectorized PDE RHS"""
         n_species, Npde = C.shape
         out = np.zeros_like(C, dtype=float)
-
-        # Diffusion part: (D/dx^2) * L @ C_s
-        dx2 = self.domain.dx ** 2
-        for sp, s_idx in self._sp_to_idx.items():
-            D = float(self.diffusion_rates[sp])
-            out[s_idx, :] = (D / dx2) * (self._L @ C[s_idx, :])
-
-        # Reaction part (macroscopic)
-        out += self.pde_reaction_terms(C, self.reaction_rates)
+        
+        # Vectorized diffusion using einsum
+        # (D/dx^2) * L @ C_s for each species
+        diff_coeff = self._D_array[:, np.newaxis] / self._dx_squared
+        # Use @ for matrix multiplication (fast in numpy)
+        diffusion_terms = diff_coeff * (self._L @ C.T).T
+        
+        out = diffusion_terms + self.pde_reaction_terms(C, self.reaction_rates)
         return out
 
     # ------------------------------------------------------------------
