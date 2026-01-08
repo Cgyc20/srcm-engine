@@ -5,3 +5,5 @@ srcm_engine/animation_util/__pycache__/animate.cpython-312.pyc
 srcm_engine/core/__pycache__/engine.cpython-312.pyc
 srcm_engine/animation_util/__pycache__/animate.cpython-312.pyc
 srcm_engine/core/__pycache__/engine.cpython-312.pyc
+srcm_engine/core/__pycache__/engine.cpython-312.pyc
+srcm_engine/core/__pycache__/gillespie_loop.cpython-312.pyc
