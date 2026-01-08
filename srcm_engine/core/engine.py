@@ -76,34 +76,166 @@ class SRCMEngine:
     # ------------------------------------------------------------------
     # Propensity building (THIS STEP)
     # ------------------------------------------------------------------
+#     def build_propensity_vector(
+#     self,
+#     state: HybridState,
+#     pde_mass: np.ndarray,
+#     exceeds_mask: np.ndarray,
+#     sufficient_mask: np.ndarray,
+#     out: Optional[np.ndarray] = None,
+# ) -> np.ndarray:
+#         """
+#         Build propensity vector for:
+#         - diffusion blocks: n_species * K
+#         - CD blocks:        n_species * K
+#         - DC blocks:        n_species * K
+#         - hybrid blocks:    n_hybrid * K
+
+#         IMPORTANT (SRCM admissibility):
+#         Any event that REMOVES continuous mass (CD or hybrid with C_<sp> < 0)
+#         is only allowed if sufficient_mask[sp, i] == 1 in that compartment.
+#         """
+#         state.assert_consistent(self.domain)
+
+#         n_species = self.reactions.n_species
+#         K = self.domain.K
+#         n_hybrid = len(self.reactions.hybrid_reactions)
+#         # At the start of build_propensity_vector, add:
+#         sp_to_idx = self._sp_to_idx  # Local reference is faster than self. lookups
+
+
+
+#         n_blocks = 3 * n_species + n_hybrid
+#         n_total = n_blocks * K
+
+#         if out is None:
+#             a = np.zeros(n_total, dtype=float)
+#         else:
+#             if out.shape != (n_total,):
+#                 raise ValueError(f"out must have shape {(n_total,)}")
+#             a = out
+#             a.fill(0.0)
+
+#         gamma = float(self.conversion.rate)
+
+#         # ------------------------------------------------------------------
+#         # 0..(n_species-1): SSA diffusion
+#         # ------------------------------------------------------------------
+#         self._diffusion.fill_propensities(a, state.ssa, K)
+
+#         # ------------------------------------------------------------------
+#         # n_species..(2*n_species-1): CD (PDE -> SSA)
+#         # Allowed iff:
+#         #   exceeds_mask == 0  AND  sufficient_mask == 1
+#         # propensity = gamma * (PDE mass in compartment)
+#         #
+#         # NOTE: We do NOT clamp PDE itself. We only forbid negative "available mass"
+#         # from creating negative propensities.
+#         # ------------------------------------------------------------------
+#         for s_idx in range(n_species):
+#             block = n_species + s_idx
+#             start = block * K
+#             end = start + K
+
+#             cd_allowed = (exceeds_mask[s_idx, :] == 0) & (sufficient_mask[s_idx, :] == 1)
+
+#             # available PDE mass cannot be negative (if PDE has gone negative, CD must not fire)
+#             available_mass = np.maximum(pde_mass[s_idx, :], 0.0)
+
+#             a[start:end] = gamma * available_mass * cd_allowed
+
+#         # ------------------------------------------------------------------
+#         # (2*n_species)..(3*n_species-1): DC (SSA -> PDE)
+#         # Allowed iff exceeds_mask == 1
+#         # propensity = gamma * SSA count
+#         # ------------------------------------------------------------------
+#         for s_idx in range(n_species):
+#             block = 2 * n_species + s_idx
+#             start = block * K
+#             end = start + K
+
+#             dc_allowed = (exceeds_mask[s_idx, :] == 1)
+#             a[start:end] = gamma * state.ssa[s_idx, :] * dc_allowed
+
+#         # ------------------------------------------------------------------
+#         # Hybrid reactions
+#         #
+#         # SRCM admissibility:
+#         #   If hr consumes continuous mass (any C_<sp> delta < 0), only allow it
+#         #   when sufficient_mask[sp, i] == 1 for all such species sp.
+#         #
+#         # Also: if PDE mass is negative in that compartment for a consumed species,
+#         # the reaction should be disallowed (available_mass == 0 idea).
+#         # ------------------------------------------------------------------
+#         base_block = 3 * n_species
+#         h = float(self.domain.h)
+#         species = self.reactions.species
+
+#         for rxn_idx, hr in enumerate(self.reactions.hybrid_reactions):
+#             block = base_block + rxn_idx
+#             start = block * K
+
+#             # consumes_C = getattr(hr, "consumes_continuous", False)
+#             # consumed_species = getattr(hr, "consumed_species", ())
+
+#             # Infer continuous consumption from state_change (source of truth), added 7th jan 2026. (with new reaction system)
+#             consumed_species = [
+#                 key.split("_", 1)[1]
+#                 for key, delta in hr.state_change.items()
+#                 if key.startswith("C_") and delta < 0
+#             ]
+#             consumes_C = (len(consumed_species) > 0)
+
+    
+
+#             for i in range(K):
+
+#                 # Gate reactions that remove PDE particle mass
+#                 if consumes_C:
+#                     ok = True
+#                     for sp in consumed_species:
+#                         s_idx = self._sp_to_idx[sp]
+
+#                         # must pass the "every fine cell >= 1/h" test
+#                         if sufficient_mask[s_idx, i] == 0:
+#                             ok = False
+#                             break
+
+#                         # additionally, negative integrated mass is not "available"
+#                         if pde_mass[s_idx, i] < 0.0:
+#                             ok = False
+#                             break
+
+#                     if not ok:
+#                         a[start + i] = 0.0
+#                         continue
+
+#                 D_local = {sp: int(state.ssa[self._sp_to_idx[sp], i]) for sp in species}
+#                 C_local = {sp: float(pde_mass[self._sp_to_idx[sp], i]) for sp in species}
+
+#                 val = float(hr.propensity(D_local, C_local, self.reaction_rates, h))
+
+#                 # A propensity must never be negative; if it is, treat as disallowed.
+#                 # This is NOT clamping PDE; it is enforcing the mathematical constraint a>=0.
+#                 a[start + i] = val if val > 0.0 else 0.0
+
+#         return a
+
     def build_propensity_vector(
-    self,
-    state: HybridState,
-    pde_mass: np.ndarray,
-    exceeds_mask: np.ndarray,
-    sufficient_mask: np.ndarray,
-    out: Optional[np.ndarray] = None,
-) -> np.ndarray:
-        """
-        Build propensity vector for:
-        - diffusion blocks: n_species * K
-        - CD blocks:        n_species * K
-        - DC blocks:        n_species * K
-        - hybrid blocks:    n_hybrid * K
-
-        IMPORTANT (SRCM admissibility):
-        Any event that REMOVES continuous mass (CD or hybrid with C_<sp> < 0)
-        is only allowed if sufficient_mask[sp, i] == 1 in that compartment.
-        """
+        self,
+        state: HybridState,
+        pde_mass: np.ndarray,
+        exceeds_mask: np.ndarray,
+        sufficient_mask: np.ndarray,
+        out: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
         state.assert_consistent(self.domain)
-
+        
         n_species = self.reactions.n_species
         K = self.domain.K
         n_hybrid = len(self.reactions.hybrid_reactions)
-
-        n_blocks = 3 * n_species + n_hybrid
-        n_total = n_blocks * K
-
+        n_total = (3 * n_species + n_hybrid) * K
+        
         if out is None:
             a = np.zeros(n_total, dtype=float)
         else:
@@ -111,109 +243,81 @@ class SRCMEngine:
                 raise ValueError(f"out must have shape {(n_total,)}")
             a = out
             a.fill(0.0)
-
+        
         gamma = float(self.conversion.rate)
-
-        # ------------------------------------------------------------------
-        # 0..(n_species-1): SSA diffusion
-        # ------------------------------------------------------------------
-        self._diffusion.fill_propensities(a, state.ssa, K)
-
-        # ------------------------------------------------------------------
-        # n_species..(2*n_species-1): CD (PDE -> SSA)
-        # Allowed iff:
-        #   exceeds_mask == 0  AND  sufficient_mask == 1
-        # propensity = gamma * (PDE mass in compartment)
-        #
-        # NOTE: We do NOT clamp PDE itself. We only forbid negative "available mass"
-        # from creating negative propensities.
-        # ------------------------------------------------------------------
+        
+        # 1. Diffusion - already vectorized
+        
+        # 2. CD blocks - vectorize across compartments
+        cd_start = n_species * K
+        cd_end = 2 * n_species * K
+        
+        # Pre-compute available mass and masks
+        available_mass = np.maximum(pde_mass, 0.0)
+        cd_allowed = (~exceeds_mask.astype(bool)) & (sufficient_mask.astype(bool))
+        
+        # Fill CD blocks efficiently
         for s_idx in range(n_species):
-            block = n_species + s_idx
-            start = block * K
+            start = cd_start + s_idx * K
             end = start + K
-
-            cd_allowed = (exceeds_mask[s_idx, :] == 0) & (sufficient_mask[s_idx, :] == 1)
-
-            # available PDE mass cannot be negative (if PDE has gone negative, CD must not fire)
-            available_mass = np.maximum(pde_mass[s_idx, :], 0.0)
-
-            a[start:end] = gamma * available_mass * cd_allowed
-
-        # ------------------------------------------------------------------
-        # (2*n_species)..(3*n_species-1): DC (SSA -> PDE)
-        # Allowed iff exceeds_mask == 1
-        # propensity = gamma * SSA count
-        # ------------------------------------------------------------------
+            a[start:end] = gamma * available_mass[s_idx] * cd_allowed[s_idx]
+        
+        # 3. DC blocks - vectorize
+        dc_start = 2 * n_species * K
+        dc_end = 3 * n_species * K
+        
+        dc_allowed = exceeds_mask.astype(bool)
         for s_idx in range(n_species):
-            block = 2 * n_species + s_idx
-            start = block * K
+            start = dc_start + s_idx * K
             end = start + K
-
-            dc_allowed = (exceeds_mask[s_idx, :] == 1)
-            a[start:end] = gamma * state.ssa[s_idx, :] * dc_allowed
-
-        # ------------------------------------------------------------------
-        # Hybrid reactions
-        #
-        # SRCM admissibility:
-        #   If hr consumes continuous mass (any C_<sp> delta < 0), only allow it
-        #   when sufficient_mask[sp, i] == 1 for all such species sp.
-        #
-        # Also: if PDE mass is negative in that compartment for a consumed species,
-        # the reaction should be disallowed (available_mass == 0 idea).
-        # ------------------------------------------------------------------
+            a[start:end] = gamma * state.ssa[s_idx] * dc_allowed[s_idx]
+        
+        # 4. Hybrid reactions - try to vectorize if possible
         base_block = 3 * n_species
         h = float(self.domain.h)
         species = self.reactions.species
-
+        
+        # Pre-compute local D and C arrays for all compartments
+        # This can be expensive but might be worth it
+        all_D_local = np.stack([state.ssa[self._sp_to_idx[sp]] for sp in species], axis=0)
+        all_C_local = np.stack([pde_mass[self._sp_to_idx[sp]] for sp in species], axis=0)
+        
         for rxn_idx, hr in enumerate(self.reactions.hybrid_reactions):
             block = base_block + rxn_idx
             start = block * K
-
-            # consumes_C = getattr(hr, "consumes_continuous", False)
-            # consumed_species = getattr(hr, "consumed_species", ())
-
-            # Infer continuous consumption from state_change (source of truth), added 7th jan 2026. (with new reaction system)
+            
+            # Identify continuous consumers
             consumed_species = [
                 key.split("_", 1)[1]
                 for key, delta in hr.state_change.items()
                 if key.startswith("C_") and delta < 0
             ]
             consumes_C = (len(consumed_species) > 0)
-
-
+            
+            if consumes_C:
+                # Check all consumed species have sufficient mask
+                mask_valid = np.ones(K, dtype=bool)
+                for sp in consumed_species:
+                    s_idx = self._sp_to_idx[sp]
+                    mask_valid &= (sufficient_mask[s_idx] == 1)
+                    mask_valid &= (pde_mass[s_idx] >= 0.0)
+            else:
+                mask_valid = np.ones(K, dtype=bool)
+            
+            # Vectorized propensity calculation if hr.propensity supports it
+            # If not, keep loop but use pre-computed arrays
             for i in range(K):
-
-                # Gate reactions that remove PDE particle mass
-                if consumes_C:
-                    ok = True
-                    for sp in consumed_species:
-                        s_idx = self._sp_to_idx[sp]
-
-                        # must pass the "every fine cell >= 1/h" test
-                        if sufficient_mask[s_idx, i] == 0:
-                            ok = False
-                            break
-
-                        # additionally, negative integrated mass is not "available"
-                        if pde_mass[s_idx, i] < 0.0:
-                            ok = False
-                            break
-
-                    if not ok:
-                        a[start + i] = 0.0
-                        continue
-
-                D_local = {sp: int(state.ssa[self._sp_to_idx[sp], i]) for sp in species}
-                C_local = {sp: float(pde_mass[self._sp_to_idx[sp], i]) for sp in species}
-
+                if not mask_valid[i]:
+                    a[start + i] = 0.0
+                    continue
+                    
+                # Use pre-computed arrays
+                D_local = {sp: all_D_local[j, i] for j, sp in enumerate(species)}
+                C_local = {sp: all_C_local[j, i] for j, sp in enumerate(species)}
+                
                 val = float(hr.propensity(D_local, C_local, self.reaction_rates, h))
-
-                # A propensity must never be negative; if it is, treat as disallowed.
-                # This is NOT clamping PDE; it is enforcing the mathematical constraint a>=0.
-                a[start + i] = val if val > 0.0 else 0.0
-
+                a[start + i] = max(val, 0.0)
+        
         return a
 
 
