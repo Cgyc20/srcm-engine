@@ -265,9 +265,10 @@ def setup_cinematic_style():
     return colors
 
 
-def _validate_two_species(species: Sequence[str]) -> None:
-    if len(species) != 2:
-        raise ValueError("This animation helper currently supports exactly 2 species.")
+def _validate_one_or_two_species(species: Sequence[str]) -> None:
+    if len(species) not in (1, 2):
+        raise ValueError("This animation helper currently supports 1 or 2 species.")
+
 
 
 def _species_color(colors: dict, i: int) -> str:
