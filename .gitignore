@@ -1,2 +1,3 @@
 *.npz
 data/ab_switch_mean.npz
+*.pyc
