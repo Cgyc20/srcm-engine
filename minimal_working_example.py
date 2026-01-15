@@ -40,7 +40,7 @@ init_ssa[1, 3 * 40 // 4 :] = 10
 # -----------------------------
 total_time = 30.0
 dt = 0.006
-repeats = 100
+repeats = 10
 seed = 1
 
 res = m.run_repeats(
@@ -77,6 +77,8 @@ print("Saved:", out_npz)
 loaded_res, loaded_meta = load_npz(out_npz)
 print("Loaded meta keys:", sorted(list(loaded_meta.keys()))[:10], "...")
 
+for key, value in loaded_meta.items():
+    print(f"{key}: {value}")
 # -----------------------------
 # Animate + plot
 # -----------------------------
