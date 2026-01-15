@@ -10,7 +10,9 @@ m = HybridModel(species=["A", "B"])
 
 m.domain(L=10.0, K=40, pde_multiple=8, boundary="zero-flux")
 m.diffusion(A=0.1, B=0.1)
-m.conversion(threshold=4, rate=1.0)
+m.conversion(threshold={"A": 10, "B": 3}, rate=1.0)
+# or: m.conversion(threshold=[1, 2], rate=1.0)  # species order
+
 
 m.reaction_terms(lambda A, B, r: (
     r["beta"] * B - r["alpha"] * A,
@@ -78,13 +80,24 @@ print("Loaded meta keys:", sorted(list(loaded_meta.keys()))[:10], "...")
 # -----------------------------
 # Animate + plot
 # -----------------------------
+tp = meta.get("threshold_particles", 2)  # fallback if missing
+
+# Convert per-species thresholds to a single number for animation
+if isinstance(tp, dict):
+    tp_anim = max(tp.values())
+elif isinstance(tp, (list, tuple, np.ndarray)):
+    tp_anim = max(tp)
+else:
+    tp_anim = tp
+
 cfg = AnimationConfig(
     stride=20,
     interval_ms=25,
-    threshold_particles=meta["threshold_particles"],
+    threshold_particles=tp_anim,
     title="Hybrid Simulation: A ⇌ B",
     mass_plot_mode="per_species",
 )
+
 
 animate_results(loaded_res, cfg=cfg)
 plot_mass_time_series(loaded_res, plot_mode="per_species")

@@ -93,10 +93,53 @@ class HybridModel:
         self._diffusion = {sp: float(rates[sp]) for sp in self.species}
         return self
 
-    def conversion(self, *, threshold: int, rate: float = 1.0) -> "HybridModel":
+    def conversion(
+        self,
+        *,
+        threshold: float | dict[str, float] | list[float] | tuple[float, ...],
+        rate: float | dict[str, float] | list[float] | tuple[float, ...] = 1.0,
+    ) -> "HybridModel":
+        """Configure SSA<->PDE conversion.
+
+        You can supply either:
+          - scalar values (global threshold/rate for all species), OR
+          - per-species values via a dict keyed by species name, OR
+          - per-species sequences aligned with `self.species`.
+
+        Examples
+        --------
+        m.conversion(threshold=25, rate=0.5)  # global
+        m.conversion(threshold={"A": 10, "B": 50}, rate={"A": 2.0, "B": 0.2})
+        m.conversion(threshold=[10, 50], rate=[2.0, 0.2])  # aligned with species order
+        """
+
+        def _to_per_species(x, name: str):
+            # scalar -> keep scalar
+            if isinstance(x, (int, float)):
+                return float(x)
+            # dict -> ordered array
+            if isinstance(x, dict):
+                missing = [sp for sp in self.species if sp not in x]
+                if missing:
+                    raise ValueError(f"Missing {name} for species: {missing}")
+                return [float(x[sp]) for sp in self.species]
+            # sequence -> must match n_species
+            if isinstance(x, (list, tuple)):
+                if len(x) != len(self.species):
+                    raise ValueError(
+                        f"{name} must have length {len(self.species)} (one per species)"
+                    )
+                return [float(v) for v in x]
+            raise TypeError(
+                f"Unsupported type for {name}: {type(x)}. Use a scalar, dict, list, or tuple."
+            )
+
+        thr_val = _to_per_species(threshold, "threshold")
+        rate_val = _to_per_species(rate, "rate")
+
         self._conversion = ConversionParams(
-            threshold=int(threshold),
-            rate=float(rate),
+            threshold=thr_val,
+            rate=rate_val,
         )
         return self
 
@@ -282,8 +325,17 @@ class HybridModel:
             "diffusion_rates": diffusion,
 
             # conversion
-            "threshold_particles": int(conversion.threshold) if conversion is not None else None,
-            "conversion_rate": float(conversion.rate) if conversion is not None else None,
+            # (scalar for global params, list for per-species params)
+            "threshold_particles": (
+                (int(conversion.threshold) if isinstance(conversion.threshold, (int, float))
+                 else [float(v) for v in conversion.threshold])
+                if conversion is not None else None
+            ),
+            "conversion_rate": (
+                (float(conversion.rate) if isinstance(conversion.rate, (int, float))
+                 else [float(v) for v in conversion.rate])
+                if conversion is not None else None
+            ),
 
             # reactions
             "reaction_rates": rates,

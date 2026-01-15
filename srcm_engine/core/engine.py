@@ -112,7 +112,7 @@ class SRCMEngine:
             a = out
             a.fill(0.0)
 
-        gamma = float(self.conversion.rate)
+        # conversion rate can be scalar (global) or per-species array
 
         # ------------------------------------------------------------------
         # 0..(n_species-1): SSA diffusion
@@ -138,6 +138,7 @@ class SRCMEngine:
             # available PDE mass cannot be negative (if PDE has gone negative, CD must not fire)
             available_mass = np.maximum(pde_mass[s_idx, :], 0.0)
 
+            gamma = self.conversion.rate_for(s_idx)
             a[start:end] = gamma * available_mass * cd_allowed
 
         # ------------------------------------------------------------------
@@ -151,6 +152,7 @@ class SRCMEngine:
             end = start + K
 
             dc_allowed = (exceeds_mask[s_idx, :] == 1)
+            gamma = self.conversion.rate_for(s_idx)
             a[start:end] = gamma * state.ssa[s_idx, :] * dc_allowed
 
         # ------------------------------------------------------------------
