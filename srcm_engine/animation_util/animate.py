@@ -380,22 +380,59 @@ def animate_results(res: SimulationResults, cfg: Optional[AnimationConfig] = Non
     plt.show()
     return ani
 
+# def _threshold_conc_map(
+#     threshold_particles: float | Dict[str, float],
+#     *,
+#     species: Sequence[str],
+#     h: float,
+# ) -> Dict[str, float]:
+#     """
+#     Returns dict mapping species -> concentration threshold (particles/length).
+#     Accepts either scalar threshold (applied to all) or dict per species.
+#     """
+#     if isinstance(threshold_particles, dict):
+#         return {sp: float(threshold_particles[sp]) / h for sp in species if sp in threshold_particles}
+#     else:
+#         thr = float(threshold_particles) / h
+#         return {sp: thr for sp in species}
+
 def _threshold_conc_map(
-    threshold_particles: float | Dict[str, float],
+    threshold_particles,
     *,
     species: Sequence[str],
     h: float,
 ) -> Dict[str, float]:
     """
     Returns dict mapping species -> concentration threshold (particles/length).
-    Accepts either scalar threshold (applied to all) or dict per species.
-    """
-    if isinstance(threshold_particles, dict):
-        return {sp: float(threshold_particles[sp]) / h for sp in species if sp in threshold_particles}
-    else:
-        thr = float(threshold_particles) / h
-        return {sp: thr for sp in species}
 
+    Accepts:
+      - scalar: applied to all species
+      - dict: {species: thr}
+      - list/tuple/np.ndarray: thresholds in species order
+    """
+    if threshold_particles is None:
+        return {}
+
+    # dict per species
+    if isinstance(threshold_particles, dict):
+        out: Dict[str, float] = {}
+        for sp in species:
+            if sp in threshold_particles:
+                out[sp] = float(threshold_particles[sp]) / h
+        return out
+
+    # list/tuple/ndarray in species order
+    if isinstance(threshold_particles, (list, tuple, np.ndarray)):
+        if len(threshold_particles) != len(species):
+            raise ValueError(
+                f"threshold_particles length {len(threshold_particles)} does not match "
+                f"number of species {len(species)} ({list(species)})."
+            )
+        return {sp: float(threshold_particles[i]) / h for i, sp in enumerate(species)}
+
+    # scalar for all species
+    thr = float(threshold_particles) / h
+    return {sp: thr for sp in species}
 
 
 # ============================================================

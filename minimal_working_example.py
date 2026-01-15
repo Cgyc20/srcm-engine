@@ -82,23 +82,18 @@ for key, value in loaded_meta.items():
 # -----------------------------
 # Animate + plot
 # -----------------------------
-tp = meta.get("threshold_particles", 2)  # fallback if missing
+tp = meta.get("threshold_particles", meta.get("threshold", None))
 
-# Convert per-species thresholds to a single number for animation
-if isinstance(tp, dict):
-    tp_anim = max(tp.values())
-elif isinstance(tp, (list, tuple, np.ndarray)):
-    tp_anim = max(tp)
-else:
-    tp_anim = tp
 
 cfg = AnimationConfig(
     stride=20,
     interval_ms=25,
-    threshold_particles=tp_anim,
+    threshold_particles=tp,   # pass through; animate.py handles dict now
+    show_threshold=(tp is not None),
     title="Hybrid Simulation: A ⇌ B",
     mass_plot_mode="per_species",
 )
+
 
 
 animate_results(loaded_res, cfg=cfg)
