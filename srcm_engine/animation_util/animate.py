@@ -145,7 +145,9 @@ class AnimationConfig:
     stride: int = 10
     interval_ms: int = 30
     show_threshold: bool = True
-    threshold_particles: Optional[float] = None  # particles per SSA compartment
+    #threshold_particles: Optional[float] = None  # particles per SSA compartment
+    threshold_particles: Optional[float | Dict[str, float]] = None  # scalar or per-species dict
+
     title: str = "SRCM Hybrid Simulation"
     blit: bool = False
     mass_plot_mode: Literal["single", "per_species", "none"] = "single"
@@ -241,18 +243,40 @@ def animate_results(res: SimulationResults, cfg: Optional[AnimationConfig] = Non
             label=f"PDE {sp}",
         )
         lines_pde.append(line)
+    
+    #Removed 15h January, so we could possibly have two thresholds
+    # threshold_line = None
+    # if cfg.show_threshold and (cfg.threshold_particles is not None):
+    #     conc_threshold = float(cfg.threshold_particles) / h
+    #     threshold_line = ax_main.axhline(
+    #         conc_threshold,
+    #         color=colors["threshold"],
+    #         linestyle=":",
+    #         linewidth=2.5,
+    #         alpha=0.9,
+    #         label=f"Threshold ({cfg.threshold_particles} particles)",
+    #     )
 
-    threshold_line = None
+    threshold_lines: List[mpl.lines.Line2D] = []
     if cfg.show_threshold and (cfg.threshold_particles is not None):
-        conc_threshold = float(cfg.threshold_particles) / h
-        threshold_line = ax_main.axhline(
-            conc_threshold,
-            color=colors["threshold"],
-            linestyle=":",
-            linewidth=2.5,
-            alpha=0.9,
-            label=f"Threshold ({cfg.threshold_particles} particles)",
-        )
+        thr_map = _threshold_conc_map(cfg.threshold_particles, species=res.species, h=h)
+
+        for i, sp in enumerate(res.species):
+            if sp not in thr_map:
+                continue
+
+            # slightly different style per species so you can tell them apart
+            ln = ax_main.axhline(
+                thr_map[sp],
+                color=_species_color(colors, i),
+                linestyle=":",
+                linewidth=2.5,
+                alpha=0.9,
+                label=f"Threshold {sp} ({(cfg.threshold_particles[sp] if isinstance(cfg.threshold_particles, dict) else cfg.threshold_particles)} particles)",
+            )
+            threshold_lines.append(ln)
+
+
 
     ax_main.set_xlim(0, 1)
     ax_main.set_ylim(0, max_conc * 1.15)
@@ -346,8 +370,8 @@ def animate_results(res: SimulationResults, cfg: Optional[AnimationConfig] = Non
             artists += list(bar)
         artists += lines_pde
         artists.append(time_text)
-        if threshold_line is not None:
-            artists.append(threshold_line)
+        artists += threshold_lines
+
         # blit doesn't play perfectly with shared axes sometimes; cfg.blit controls it anyway.
         return artists
 
@@ -355,6 +379,23 @@ def animate_results(res: SimulationResults, cfg: Optional[AnimationConfig] = Non
     plt.tight_layout()
     plt.show()
     return ani
+
+def _threshold_conc_map(
+    threshold_particles: float | Dict[str, float],
+    *,
+    species: Sequence[str],
+    h: float,
+) -> Dict[str, float]:
+    """
+    Returns dict mapping species -> concentration threshold (particles/length).
+    Accepts either scalar threshold (applied to all) or dict per species.
+    """
+    if isinstance(threshold_particles, dict):
+        return {sp: float(threshold_particles[sp]) / h for sp in species if sp in threshold_particles}
+    else:
+        thr = float(threshold_particles) / h
+        return {sp: thr for sp in species}
+
 
 
 # ============================================================
@@ -465,17 +506,24 @@ def animate_overlay(
         )
         line_main.append(ln)
 
-    threshold_line = None
+    threshold_lines: List[mpl.lines.Line2D] = []
     if cfg.show_threshold and cfg.threshold_particles is not None:
-        conc_threshold = float(cfg.threshold_particles) / h
-        threshold_line = ax.axhline(
-            conc_threshold,
-            color=colors["threshold"],
-            linestyle=":",
-            linewidth=2.5,
-            alpha=0.9,
-            label=f"Threshold ({cfg.threshold_particles} ptcl)",
-        )
+        thr_map = _threshold_conc_map(cfg.threshold_particles, species=res_main.species, h=h)
+
+        for i, sp in enumerate(res_main.species):
+            if sp not in thr_map:
+                continue
+
+            ln = ax.axhline(
+                thr_map[sp],
+                color=_species_color(colors, i),
+                linestyle=":",
+                linewidth=2.5,
+                alpha=0.9,
+                label=f"Threshold {sp} ({(cfg.threshold_particles[sp] if isinstance(cfg.threshold_particles, dict) else cfg.threshold_particles)} ptcl)",
+            )
+            threshold_lines.append(ln)
+
 
     ax.set_xlim(0, 1)
     ax.set_ylim(0, max_conc * 1.15)
@@ -526,8 +574,8 @@ def animate_overlay(
             artists += list(bo)
         artists += line_main
         artists.append(time_text)
-        if threshold_line is not None:
-            artists.append(threshold_line)
+        artists += threshold_lines
+
         return artists
 
     ani = FuncAnimation(fig, update, frames=frames, interval=int(cfg.interval_ms), blit=bool(cfg.blit))
