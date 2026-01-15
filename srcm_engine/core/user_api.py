@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Sequence, Union
+from typing import Callable, Dict, List, Optional, Sequence, Union, Any
 
 import numpy as np
 
@@ -21,12 +21,7 @@ class HybridModel:
     """
     User-friendly wrapper around SRCMEngine.
 
-    Users never touch:
-      - HybridReactionSystem internals
-      - propensity lambdas
-      - SRCM bookkeeping
-
-    They only specify:
+    Users specify:
       - species
       - domain / diffusion / conversion
       - macroscopic reactions
@@ -60,12 +55,12 @@ class HybridModel:
 
         self._domain = None
         self._conversion = None
-        self._diffusion_rates = None   # ✅ add this
-        self._rates = None             # ✅ add this
-        self._engine = None            # ✅ add this
+        self._diffusion = None
+        self._rates = None
+        self._engine = None
 
         self._reactions = HybridReactionSystem(species=list(self.species))
-
+        self._rhs_user = None
 
     # ------------------------------------------------------------------
     # configuration
@@ -96,10 +91,11 @@ class HybridModel:
     def conversion(
         self,
         *,
-        threshold: float | dict[str, float] | list[float] | tuple[float, ...],
-        rate: float | dict[str, float] | list[float] | tuple[float, ...] = 1.0,
+        threshold: float | Dict[str, float] | List[float] | tuple[float, ...],
+        rate: float | Dict[str, float] | List[float] | tuple[float, ...] = 1.0,
     ) -> "HybridModel":
-        """Configure SSA<->PDE conversion.
+        """
+        Configure SSA<->PDE conversion.
 
         You can supply either:
           - scalar values (global threshold/rate for all species), OR
@@ -113,34 +109,44 @@ class HybridModel:
         m.conversion(threshold=[10, 50], rate=[2.0, 0.2])  # aligned with species order
         """
 
-        def _to_per_species(x, name: str):
-            # scalar -> keep scalar
-            if isinstance(x, (int, float)):
+        def _to_per_species(x: Any, name: str) -> float | List[float]:
+            # scalar -> scalar
+            if isinstance(x, (int, float, np.integer, np.floating)):
                 return float(x)
-            # dict -> ordered array
+
+            # dict -> list aligned with self.species
             if isinstance(x, dict):
                 missing = [sp for sp in self.species if sp not in x]
+                extra = [sp for sp in x.keys() if sp not in self.species]
                 if missing:
                     raise ValueError(f"Missing {name} for species: {missing}")
+                if extra:
+                    raise ValueError(f"Unknown species in {name}: {extra}")
                 return [float(x[sp]) for sp in self.species]
-            # sequence -> must match n_species
-            if isinstance(x, (list, tuple)):
+
+            # sequence -> must match length
+            if isinstance(x, (list, tuple, np.ndarray)):
                 if len(x) != len(self.species):
                     raise ValueError(
                         f"{name} must have length {len(self.species)} (one per species)"
                     )
                 return [float(v) for v in x]
+
             raise TypeError(
-                f"Unsupported type for {name}: {type(x)}. Use a scalar, dict, list, or tuple."
+                f"Unsupported type for {name}: {type(x)}. Use a scalar, dict, list, tuple, or ndarray."
             )
 
         thr_val = _to_per_species(threshold, "threshold")
         rate_val = _to_per_species(rate, "rate")
 
-        self._conversion = ConversionParams(
-            threshold=thr_val,
-            rate=rate_val,
-        )
+        # Optional: enforce integer thresholds if that's your intention.
+        # If you want strictly int thresholds, uncomment below:
+        # if isinstance(thr_val, float) and not thr_val.is_integer():
+        #     raise ValueError("Global threshold must be an integer")
+        # if isinstance(thr_val, list) and any((not float(v).is_integer()) for v in thr_val):
+        #     raise ValueError("Per-species thresholds must be integers")
+
+        self._conversion = ConversionParams(threshold=thr_val, rate=rate_val)
         return self
 
     # ------------------------------------------------------------------
@@ -175,7 +181,6 @@ class HybridModel:
 
         numeric_rate = 0.0 if rate is None else float(rate)
 
-        print(numeric_rate)
         self._reactions.add_reaction_original(
             reactants,
             products,
@@ -183,7 +188,6 @@ class HybridModel:
             rate_name=str(rate_name),
         )
         return self
-
 
     # ------------------------------------------------------------------
     # build
@@ -197,21 +201,22 @@ class HybridModel:
             raise ValueError("diffusion() not set")
         if self._rhs_user is None:
             raise ValueError("reaction_terms() not set")
+        if self._reactions is None:
+            raise RuntimeError("Internal reaction system not initialised")
 
         self._rates = {str(k): float(v) for k, v in rates.items()}
 
-        # ✅ update macroscopic stored rates for display
+        # Update stored macroscopic rates for display
         for rec in self._reactions.pure_reactions:
             rn = rec.get("rate_name", None)
             if rn is not None and rn in self._rates:
                 rec["rate"] = float(self._rates[rn])
 
-
         n = len(self.species)
 
-        def pde_terms(C: np.ndarray, rates: Dict[str, float]) -> np.ndarray:
+        def pde_terms(C: np.ndarray, rates_: Dict[str, float]) -> np.ndarray:
             args = [C[i] for i in range(n)]
-            out = self._rhs_user(*args, rates)
+            out = self._rhs_user(*args, rates_)  # type: ignore[misc]
 
             if isinstance(out, np.ndarray):
                 return out.astype(float, copy=False)
@@ -236,13 +241,16 @@ class HybridModel:
     # running
     # ------------------------------------------------------------------
     def _check_ic(self, init_ssa: np.ndarray, init_pde: np.ndarray):
+        if self._domain is None:
+            raise RuntimeError("Domain not configured yet. Call m.domain(...) first.")
+
         d = self._domain
         n = len(self.species)
 
         if init_ssa.shape != (n, d.K):
-            raise ValueError("init_ssa has wrong shape")
+            raise ValueError(f"init_ssa has wrong shape: expected {(n, d.K)}, got {init_ssa.shape}")
         if init_pde.shape != (n, d.n_pde):
-            raise ValueError("init_pde has wrong shape")
+            raise ValueError(f"init_pde has wrong shape: expected {(n, d.n_pde)}, got {init_pde.shape}")
 
     def run(
         self,
@@ -266,7 +274,6 @@ class HybridModel:
             seed=int(seed),
         )
 
-
     def run_repeats(
         self,
         init_ssa: np.ndarray,
@@ -282,6 +289,7 @@ class HybridModel:
         prefer: str = "processes",
     ):
         self._check_ic(init_ssa, init_pde)
+
         if self._engine is None:
             raise RuntimeError("Model not built yet. Call build(rates=...) first.")
 
@@ -298,18 +306,33 @@ class HybridModel:
             progress=bool(progress),
         )
 
-
+    # ------------------------------------------------------------------
+    # metadata (reproducibility)
+    # ------------------------------------------------------------------
     def metadata(self) -> dict:
         if self._engine is None:
             raise RuntimeError("Model not built yet")
+        if self._domain is None:
+            raise RuntimeError("Domain not configured")
+        if self._conversion is None:
+            raise RuntimeError("Conversion not configured")
 
         d = self._domain
-        if d is None:
-            raise RuntimeError("Domain not configured")
-
-        diffusion = dict(self._diffusion_rates) if self._diffusion_rates is not None else None
         conversion = self._conversion
+        diffusion = dict(self._diffusion) if self._diffusion is not None else None
         rates = dict(self._rates) if self._rates is not None else None
+
+        # --- Normalise conversion params to per-species lists (aligned to species order)
+        def _as_list(x: float | List[float], caster: Callable[[float], Any]) -> List[Any]:
+            if isinstance(x, (int, float, np.integer, np.floating)):
+                return [caster(float(x))] * len(self.species)
+            return [caster(float(v)) for v in x]
+
+        thr_list = _as_list(conversion.threshold, int)  # thresholds should be integer-ish
+        rate_list = _as_list(conversion.rate, float)
+
+        thr_by_sp = {sp: int(v) for sp, v in zip(self.species, thr_list)}
+        rate_by_sp = {sp: float(v) for sp, v in zip(self.species, rate_list)}
 
         return {
             "model": "SRCM Hybrid Model",
@@ -324,43 +347,48 @@ class HybridModel:
             # diffusion
             "diffusion_rates": diffusion,
 
-            # conversion
-            # (scalar for global params, list for per-species params)
+            # conversion (backwards compatible keys)
             "threshold_particles": (
-                (int(conversion.threshold) if isinstance(conversion.threshold, (int, float))
-                 else [float(v) for v in conversion.threshold])
-                if conversion is not None else None
+                int(conversion.threshold)
+                if isinstance(conversion.threshold, (int, float, np.integer, np.floating))
+                else [int(v) for v in conversion.threshold]
             ),
             "conversion_rate": (
-                (float(conversion.rate) if isinstance(conversion.rate, (int, float))
-                 else [float(v) for v in conversion.rate])
-                if conversion is not None else None
+                float(conversion.rate)
+                if isinstance(conversion.rate, (int, float, np.integer, np.floating))
+                else [float(v) for v in conversion.rate]
             ),
+
+            # conversion (new explicit reproducible keys)
+            "threshold_particles_list": thr_list,
+            "conversion_rate_list": rate_list,
+            "threshold_particles_by_species": thr_by_sp,
+            "conversion_rate_by_species": rate_by_sp,
 
             # reactions
             "reaction_rates": rates,
             "hybrid_labels": self.hybrid_labels(),
         }
 
-
-
-
-
     # ------------------------------------------------------------------
     # inspection
     # ------------------------------------------------------------------
     def describe_reactions(self) -> None:
-        """
-        Print macroscopic reactions and their SRCM decomposition.
-        """
-        self._reactions.describe()
+        """Print macroscopic reactions and their SRCM decomposition."""
+        if self._reactions is None:
+            raise RuntimeError("Internal reaction system not initialised")
+        # prefer full description if available, otherwise fallback
+        if hasattr(self._reactions, "describe_full"):
+            self._reactions.describe_full()
+        else:
+            self._reactions.describe()
 
     def hybrid_labels(self) -> List[str]:
+        if self._reactions is None:
+            raise RuntimeError("Internal reaction system not initialised")
         return [hr.label for hr in self._reactions.hybrid_reactions]
-    
 
-
-        # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
     # compatibility + convenience
     # ------------------------------------------------------------------
     @property
@@ -371,6 +399,8 @@ class HybridModel:
 
     @property
     def reactions(self) -> HybridReactionSystem:
+        if self._reactions is None:
+            raise RuntimeError("Internal reaction system not initialised")
         return self._reactions
 
     @property
@@ -378,11 +408,3 @@ class HybridModel:
         if self._engine is None:
             raise RuntimeError("Model not built yet. Call m.build(rates=...) first.")
         return self._engine
-
-    def describe_reactions(self) -> None:
-        # prefer full description if available, otherwise fallback
-        if hasattr(self._reactions, "describe_full"):
-            self._reactions.describe_full()
-        else:
-            self._reactions.describe()
-
