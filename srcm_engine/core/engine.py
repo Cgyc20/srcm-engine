@@ -665,3 +665,131 @@ class SRCMEngine:
             domain=self.domain,
             species=self.reactions.species,
         )
+
+    def run_repeats_final(
+    self,
+    initial_ssa: np.ndarray,
+    initial_pde: Optional[np.ndarray],
+    time: float,
+    dt: float,
+    repeats: int,
+    seed: int = 0,
+    *,
+    parallel: bool = False,
+    n_jobs: int = -1,
+    prefer: str = "processes",
+    progress: bool = True,
+    save_path: Optional[str] = None,
+):
+        """
+        Run multiple independent simulations and return ONLY the final frame from each repeat.
+
+        Returns
+        -------
+        final_ssa : np.ndarray
+            Shape (repeats, n_species, K), dtype int
+        final_pde : np.ndarray
+            Shape (repeats, n_species, Npde), dtype float
+        t_final : float
+            Final time recorded (typically floor(time/dt)*dt)
+        """
+        if repeats <= 0:
+            raise ValueError("repeats must be > 0")
+
+        # One run to get shapes + final time
+        res0 = self.run(initial_ssa, initial_pde, time=time, dt=dt, seed=seed)
+        n_species, K, _ = res0.ssa.shape
+        _, Npde, _ = res0.pde.shape
+        t_final = float(res0.time[-1])
+
+        final_ssa = np.empty((repeats, n_species, K), dtype=int)
+        final_pde = np.empty((repeats, n_species, Npde), dtype=float)
+
+        final_ssa[0] = res0.ssa[:, :, -1]
+        final_pde[0] = res0.pde[:, :, -1]
+
+        if repeats == 1:
+            if save_path is not None:
+                np.savez_compressed(
+                    save_path,
+                    final_ssa=final_ssa,
+                    final_pde=final_pde,
+                    t_final=t_final,
+                    species=np.array(self.reactions.species, dtype=object),
+                )
+            return final_ssa, final_pde, t_final
+
+        # -----------------------
+        # Serial
+        # -----------------------
+        if not parallel:
+            iterator = range(1, repeats)
+
+            if progress:
+                try:
+                    from tqdm.auto import tqdm
+                    iterator = tqdm(
+                        iterator,
+                        total=repeats - 1,
+                        desc="SRCM repeats (final only)",
+                        unit="run",
+                        dynamic_ncols=True,
+                    )
+                except ImportError:
+                    pass
+
+            for r in iterator:
+                res_r = self.run(initial_ssa, initial_pde, time=time, dt=dt, seed=seed + r)
+                final_ssa[r] = res_r.ssa[:, :, -1]
+                final_pde[r] = res_r.pde[:, :, -1]
+
+        # -----------------------
+        # Parallel (joblib)
+        # -----------------------
+        else:
+            try:
+                from joblib import Parallel, delayed
+            except ImportError as e:
+                raise ImportError(
+                    "Parallel repeats requires joblib. Install with: pip install joblib"
+                ) from e
+
+            # tqdm optional
+            if progress:
+                try:
+                    from tqdm.auto import tqdm
+                except ImportError:
+                    tqdm = None
+                    progress = False
+
+            def one(r: int):
+                res = self.run(initial_ssa, initial_pde, time=time, dt=dt, seed=seed + r)
+                return (r, res.ssa[:, :, -1].astype(int), res.pde[:, :, -1].astype(float))
+
+            tasks = (delayed(one)(r) for r in range(1, repeats))
+            par = Parallel(n_jobs=n_jobs, prefer=prefer, return_as="generator")
+            results_iter = par(tasks)
+
+            if progress and tqdm is not None:
+                results_iter = tqdm(
+                    results_iter,
+                    total=repeats - 1,
+                    desc="SRCM repeats (final only)",
+                    unit="run",
+                    dynamic_ncols=True,
+                )
+
+            for r, ssa_last, pde_last in results_iter:
+                final_ssa[r] = ssa_last
+                final_pde[r] = pde_last
+
+        if save_path is not None:
+            np.savez_compressed(
+                save_path,
+                final_ssa=final_ssa,
+                final_pde=final_pde,
+                t_final=t_final,
+                species=np.array(self.reactions.species, dtype=object),
+            )
+
+        return final_ssa, final_pde, t_final

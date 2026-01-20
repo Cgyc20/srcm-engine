@@ -408,3 +408,51 @@ class HybridModel:
         if self._engine is None:
             raise RuntimeError("Model not built yet. Call m.build(rates=...) first.")
         return self._engine
+
+
+    def run_repeats_final(
+    self,
+    init_ssa: np.ndarray,
+    init_pde: np.ndarray,
+    *,
+    time: float,
+    dt: float,
+    repeats: int,
+    seed: int = 0,
+    parallel: bool = False,
+    n_jobs: int = -1,
+    progress: bool = True,
+    prefer: str = "processes",
+    save_path: Optional[str] = None,
+    ):
+        """
+        Run multiple independent simulations and return ONLY the final frame from each repeat.
+
+        Returns
+        -------
+        final_ssa : np.ndarray
+            Shape (repeats, n_species, K), dtype int
+        final_pde : np.ndarray
+            Shape (repeats, n_species, Npde), dtype float
+        t_final : float
+            The final recorded time (typically floor(time/dt)*dt)
+        """
+        self._check_ic(init_ssa, init_pde)
+
+        if self._engine is None:
+            raise RuntimeError("Model not built yet. Call build(rates=...) first.")
+
+        # Requires SRCMEngine.run_repeats_final to exist
+        return self._engine.run_repeats_final(
+            initial_ssa=init_ssa,
+            initial_pde=init_pde,
+            time=float(time),
+            dt=float(dt),
+            repeats=int(repeats),
+            seed=int(seed),
+            parallel=bool(parallel),
+            n_jobs=int(n_jobs),
+            prefer=str(prefer),
+            progress=bool(progress),
+            save_path=save_path,
+        )

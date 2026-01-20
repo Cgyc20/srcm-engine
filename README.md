@@ -229,6 +229,37 @@ Metadata includes:
 This ensures simulations are **fully reproducible**.
 
 ---
+## 7.5 Saving Final-State Ensembles (Raw Repeat Data)
+
+In addition to ensemble-averaged time series, SRCM Engine supports running
+**multiple independent simulations and saving only the final state from each repeat**.
+
+This is useful when:
+
+- analysing **distributional outcomes** rather than just mean behaviour
+- studying **pattern variability** and stochastic effects
+- performing **post-hoc statistical analysis** on final spatial configurations
+- storing large ensembles efficiently without saving full time series data
+
+Instead of averaging across repeats, this mode returns the **final SSA and PDE
+states from every run**.
+
+### Example: Saving Final Frames from Repeated Simulations
+
+```python
+final_ssa, final_pde, t_final = m.run_repeats_final(
+    init_ssa,
+    init_pde,
+    time=30.0,
+    dt=0.006,
+    repeats=100,
+    seed=0,
+    parallel=True,
+    n_jobs=-1,
+    save_path="ab_switch_final_frames.npz",
+)
+```
+
 
 ## 8. Visualisation
 
