@@ -1,3 +1,5 @@
 *.npz
 data/ab_switch_mean.npz
 *.pyc
+srcm_engine/core/__pycache__/engine.cpython-312.pyc
+srcm_engine/core/__pycache__/user_api.cpython-312.pyc
