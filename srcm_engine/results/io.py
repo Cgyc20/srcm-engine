@@ -192,3 +192,56 @@ def save_all(
 
     if also_write_single_npz:
         save_npz(results, path_prefix.with_suffix(".full.npz"), meta=meta)
+
+
+
+def save_trajectories(
+    results: SimulationResults,
+    path_prefix: PathLike,
+    *,
+    meta: Optional[Dict[str, Any]] = None,
+) -> None:
+    """
+    Save ensemble (trajectory) results.
+
+    Expected shapes:
+      SSA: (R, S, K, T)
+      PDE: (R, S, Npde, T) or None
+    """
+    path_prefix = Path(path_prefix)
+    path_prefix.parent.mkdir(parents=True, exist_ok=True)
+
+    npz_path = path_prefix.with_suffix(".traj.npz")
+    json_path = path_prefix.with_suffix(".traj.json")
+
+    if results.ssa.ndim != 4:
+        raise ValueError(
+            f"save_trajectories expects SSA with 4 dimensions (R,S,K,T), "
+            f"got shape {results.ssa.shape}"
+        )
+
+    np.savez_compressed(
+        npz_path,
+        time=results.time,
+        ssa=results.ssa,
+        pde=results.pde,
+    )
+
+    meta_out: Dict[str, Any] = dict(meta or {})
+    meta_out["run_type"] = meta_out.get("run_type", "trajectories")
+    meta_out["is_ensemble"] = True
+    meta_out["n_repeats"] = int(results.ssa.shape[0])
+    meta_out["species"] = list(results.species)
+
+    meta_out["domain"] = {
+        "length": float(results.domain.length),
+        "n_ssa": int(results.domain.K),
+        "pde_multiple": int(results.domain.pde_multiple),
+        "boundary": str(results.domain.boundary),
+    }
+
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(meta_out, f, indent=2)
+
+    print(f"Trajectory ensemble saved to:\n  {npz_path}\n  {json_path}")
+
