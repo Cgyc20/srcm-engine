@@ -541,19 +541,19 @@ class SRCMEngine:
 
 
     def run_repeats(
-    self,
-    initial_ssa: np.ndarray,
-    initial_pde: Optional[np.ndarray],
-    time: float,
-    dt: float,
-    repeats: int,
-    seed: int = 0,
-    *,
-    parallel: bool = False,
-    n_jobs: int = -1,
-    prefer: str = "processes",
-    progress: bool = True,
-):
+                    self,
+                    initial_ssa: np.ndarray,
+                    initial_pde: Optional[np.ndarray],
+                    time: float,
+                    dt: float,
+                    repeats: int,
+                    seed: int = 0,
+                    *,
+                    parallel: bool = False,
+                    n_jobs: int = -1,
+                    prefer: str = "processes",
+                    progress: bool = True,
+                ):
         """
         Run multiple independent simulations and return mean SSA/PDE time series.
 
@@ -665,6 +665,122 @@ class SRCMEngine:
             domain=self.domain,
             species=self.reactions.species,
         )
+    
+
+    ### Edited on the 3rd February 2026, Charlie Cameron. We are going to do a - run individual trajectories to save
+
+
+    def run_trajectories(
+                        self,
+                        initial_ssa: np.ndarray,
+                        initial_pde: Optional[np.ndarray],
+                        time: float,
+                        dt: float,
+                        repeats: int,
+                        seed: int = 0,
+                        *,
+                        parallel: bool = False,
+                        n_jobs: int = -1,
+                        prefer: str = "processes",
+                        progress: bool = True,
+                    ):
+        """
+        Run multiple independent simulations and return individual SSA/PDE trajectories.
+
+        Returns arrays with leading dimension = repeats.
+        """
+
+        if repeats <= 0:
+            raise ValueError("repeats must be > 0")
+
+        # First run for shapes + shared time vector
+        res0 = self.run(initial_ssa, initial_pde, time=time, dt=dt, seed=seed)
+        time_vec = res0.time
+
+        # Pre-allocate (fast + consistent shapes)
+        ssa_all = np.empty((repeats,) + res0.ssa.shape, dtype=float)
+        pde_all = np.empty((repeats,) + res0.pde.shape, dtype=float)
+
+        ssa_all[0] = res0.ssa.astype(float)
+        pde_all[0] = res0.pde.astype(float)
+
+        if repeats == 1:
+            return SimulationResults(
+                time=time_vec,
+                ssa=ssa_all,
+                pde=pde_all,
+                domain=self.domain,
+                species=self.reactions.species,
+            )
+
+        # -----------------------
+        # Serial
+        # -----------------------
+        if not parallel:
+            iterator = range(1, repeats)
+
+            if progress:
+                try:
+                    from tqdm.auto import tqdm
+                    iterator = tqdm(
+                        iterator,
+                        total=repeats - 1,
+                        desc="SRCM trajectories",
+                        unit="run",
+                        dynamic_ncols=True,
+                    )
+                except ImportError:
+                    pass
+
+            for r in iterator:
+                res_r = self.run(initial_ssa, initial_pde, time=time, dt=dt, seed=seed + r)
+                ssa_all[r] = res_r.ssa.astype(float)
+                pde_all[r] = res_r.pde.astype(float)
+
+        # -----------------------
+        # Parallel (joblib)
+        # -----------------------
+        else:
+            try:
+                from joblib import Parallel, delayed
+            except ImportError as e:
+                raise ImportError("Parallel repeats requires joblib. Install with: pip install joblib") from e
+
+            if progress:
+                try:
+                    from tqdm.auto import tqdm
+                except ImportError:
+                    tqdm = None
+                    progress = False
+
+            def one(r: int):
+                res = self.run(initial_ssa, initial_pde, time=time, dt=dt, seed=seed + r)
+                return r, res.ssa.astype(float), res.pde.astype(float)
+
+            tasks = (delayed(one)(r) for r in range(1, repeats))
+            results_iter = Parallel(n_jobs=n_jobs, prefer=prefer, return_as="generator")(tasks)
+
+            if progress and tqdm is not None:
+                results_iter = tqdm(
+                    results_iter,
+                    total=repeats - 1,
+                    desc="SRCM trajectories",
+                    unit="run",
+                    dynamic_ncols=True,
+                )
+
+            for r, ssa_r, pde_r in results_iter:
+                ssa_all[r] = ssa_r
+                pde_all[r] = pde_r
+
+        return SimulationResults(
+            time=time_vec,
+            ssa=ssa_all,
+            pde=pde_all,
+            domain=self.domain,
+            species=self.reactions.species,
+        )
+
 
     def run_repeats_final(
     self,
