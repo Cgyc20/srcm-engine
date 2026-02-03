@@ -196,52 +196,57 @@ def save_all(
 
 
 def save_trajectories(
-    results: SimulationResults,
-    path_prefix: PathLike,
+    res: SimulationResults,
+    path: PathLike,
     *,
     meta: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
-    Save ensemble (trajectory) results.
+    Save trajectory ensembles in EXACTLY the same format as save_npz().
 
-    Expected shapes:
-      SSA: (R, S, K, T)
-      PDE: (R, S, Npde, T) or None
+    Same keys as save_npz:
+      time, ssa, pde, species, domain_length, n_ssa, pde_multiple, boundary, meta_json
+
+    Expected SSA shape:
+      (R, S, K, T)
+    Expected PDE shape:
+      (R, S, Npde, T) or None (will be materialized as zeros)
     """
-    path_prefix = Path(path_prefix)
-    path_prefix.parent.mkdir(parents=True, exist_ok=True)
+    path = str(path)
 
-    npz_path = path_prefix.with_suffix(".traj.npz")
-    json_path = path_prefix.with_suffix(".traj.json")
-
-    if results.ssa.ndim != 4:
+    if res.ssa.ndim != 4:
         raise ValueError(
-            f"save_trajectories expects SSA with 4 dimensions (R,S,K,T), "
-            f"got shape {results.ssa.shape}"
+            f"save_trajectories expects SSA with 4 dimensions (R,S,K,T), got {res.ssa.shape}"
         )
 
-    np.savez_compressed(
-        npz_path,
-        time=results.time,
-        ssa=results.ssa,
-        pde=results.pde,
-    )
+    # Ensure PDE exists and matches ensemble shape
+    pde = res.pde
+    if pde is None:
+        R, S, K, T = res.ssa.shape
+        # n_pde should be K * pde_multiple (from domain)
+        n_ssa = int(getattr(res.domain, "K", getattr(res.domain, "n_ssa", K)))
+        pde_multiple = int(getattr(res.domain, "pde_multiple", 1))
+        n_pde = n_ssa * pde_multiple
+        pde = np.zeros((R, S, n_pde, T), dtype=float)
 
+    # Metadata: store in meta_json exactly like save_npz
     meta_out: Dict[str, Any] = dict(meta or {})
-    meta_out["run_type"] = meta_out.get("run_type", "trajectories")
-    meta_out["is_ensemble"] = True
-    meta_out["n_repeats"] = int(results.ssa.shape[0])
-    meta_out["species"] = list(results.species)
+    if "species" not in meta_out:
+        meta_out["species"] = list(res.species)
 
-    meta_out["domain"] = {
-        "length": float(results.domain.length),
-        "n_ssa": int(results.domain.K),
-        "pde_multiple": int(results.domain.pde_multiple),
-        "boundary": str(results.domain.boundary),
+    payload: Dict[str, Any] = {
+        "time": res.time,
+        "ssa": res.ssa,
+        "pde": pde,
+        "species": np.array(list(res.species), dtype=object),
+        "domain_length": float(res.domain.length),
+        "n_ssa": int(getattr(res.domain, "K", getattr(res.domain, "n_ssa"))),
+        "pde_multiple": int(res.domain.pde_multiple),
+        "boundary": str(res.domain.boundary),
+        "meta_json": json.dumps(meta_out),
     }
 
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(meta_out, f, indent=2)
+    np.savez_compressed(path, **payload)
+    print(f"Trajectory results saved to single file: {path}")
 
-    print(f"Trajectory ensemble saved to:\n  {npz_path}\n  {json_path}")
 
