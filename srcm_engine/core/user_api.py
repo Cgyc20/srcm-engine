@@ -305,6 +305,42 @@ class HybridModel:
             prefer=str(prefer),
             progress=bool(progress),
         )
+    
+
+    def run_trajectories(
+                        self,
+                        init_ssa: np.ndarray,
+                        init_pde: np.ndarray,
+                        *,
+                        time: float,
+                        dt: float,
+                        repeats: int,
+                        seed: int = 0,
+                        parallel: bool = False,
+                        n_jobs: int = -1,
+                        progress: bool = True,
+                        prefer: str = "processes",
+                        ):
+        self._check_ic(init_ssa, init_pde)
+
+        if self._engine is None:
+            raise RuntimeError("Model not built yet. Call build(rates=...) first.")
+
+        return self._engine.run_trajectories(
+            initial_ssa=init_ssa,
+            initial_pde=init_pde,
+            time=float(time),
+            dt=float(dt),
+            repeats=int(repeats),
+            seed=int(seed),
+            parallel=bool(parallel),
+            n_jobs=int(n_jobs),
+            prefer=str(prefer),
+            progress=bool(progress),
+        )
+
+
+
 
     # ------------------------------------------------------------------
     # metadata (reproducibility)
