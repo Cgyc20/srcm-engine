@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "srcm-engine"
-version = "0.2.2"
+version = "0.2.4"
 description = ""
 authors = ["Cgyc20 <cgyc20@bath.ac.uk>"]
 readme = "README.md"
