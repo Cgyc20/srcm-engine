@@ -94,6 +94,12 @@ class SRCMEngine:
         IMPORTANT (SRCM admissibility):
         Any event that REMOVES continuous mass (CD or hybrid with C_<sp> < 0)
         is only allowed if sufficient_mask[sp, i] == 1 in that compartment.
+
+        INPUT:
+            state: HybridState Container
+            pde_mass: The vector containing the PDE mass 
+            exceeds_mask: The vector (n_species, K), int8 mask where 1 means combined mass > threshold else 0.
+            sufficient_mask: Calculated from `sufficient_pde_concentration_mask' function. In regime_utils.py. Mask (n_species,K), 1 if ALL PDE cells in that compartment have concentration >= (1/h), else 0. 
         """
         state.assert_consistent(self.domain)
 
