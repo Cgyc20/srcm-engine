@@ -339,8 +339,8 @@ class SRCMEngine:
                 slice_[active] -= share / dx
                 remaining = 0.0
 
-                state.add_discrete(species_idx, comp, +1)
-                return
+            state.add_discrete(species_idx, comp, +1)
+            return
 
         # -------------------- DC: SSA -> PDE --------------------
         if block < 3 * n_species:
