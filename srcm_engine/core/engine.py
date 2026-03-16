@@ -139,8 +139,10 @@ class SRCMEngine:
             start = block * K
             end = start + K
 
-            cd_allowed = (exceeds_mask[s_idx, :] == 0) & (sufficient_mask[s_idx, :] == 1)
-
+            #Charlie:  This is changes made on 16th March 2026, this is because we want to relax the condition for conversion. We want to be able to have mass converted if there exists a point less than 1/h and if there is less than one particles worth.
+            # cd_allowed = (exceeds_mask[s_idx, :] == 0) & (sufficient_mask[s_idx, :] == 1)
+            cd_allowed = (exceeds_mask[s_idx, :] == 0) #We actually remove the sufficient mask requirement.
+            
             # available PDE mass cannot be negative (if PDE has gone negative, CD must not fire)
             available_mass = np.maximum(pde_mass[s_idx, :], 0.0)
 
@@ -273,12 +275,72 @@ class SRCMEngine:
         # -------------------- CD: PDE -> SSA --------------------
         if block < 2 * n_species:
             species_idx = block - n_species
+            #Previous code
+            # state.add_discrete(species_idx, comp, +1)
+            # # Remove one particle mass from PDE slice: - (1/h)
+            # state.add_continuous_particle_mass(self.domain, species_idx, comp, -1)
 
-            # Add one discrete particle
-            state.add_discrete(species_idx, comp, +1)
-            # Remove one particle mass from PDE slice: - (1/h)
-            state.add_continuous_particle_mass(self.domain, species_idx, comp, -1)
-            return
+            # 16th March 2026, This is the update. We relax the conversion condition
+            
+            P = self.domain.pde_multiple
+            start_index = comp*P
+            final_index = start_index+P
+            slice_ = state.pde[species_idx,start_index:final_index]
+            dx = self.domain.dx
+            h = self.domain.h
+            Y_k = float(slice_.sum()*dx) # The pseudo particle mass
+
+            if Y_k < 1.0:
+                #Probabilistic: we always clear the mass
+                slice_[:] = 0.0 #We set the slice to zero
+                if float(rng.random())<Y_k:
+                    state.add_discrete(species_idx, comp, +1)
+
+                return 
+            
+            # Case 2: at least one particle of mass
+            # try uniform removal first
+            drop = 1.0/h
+            if np.all(slice_ > drop):
+                state.add_continuous_particle_mass(self.domain, species_idx, comp, -1)
+                state.add_discrete(species_idx, comp, + 1)
+                return 
+            
+            #Otherwise: zero out smaller cells and then remove the remaining mass from bigger ones.
+            remaining = 1.0
+            active = np.ones(P, dtype=bool)
+
+            while remaining > 1e-12:
+                n_active = np.sum(active)
+                if n_active == 0:
+                    raise RuntimeError("Not enough PDE mass to remove one particle")
+
+                share = remaining / n_active
+                changed = False
+
+                for j in range(P):
+                    if not active[j]:
+                        continue
+
+                    removable = slice_[j] * dx
+
+                    if removable <= share + 1e-12:
+                        # this cell cannot support the equal share, so empty it
+                        remaining -= removable
+                        slice_[j] = 0.0
+                        active[j] = False
+                        changed = True
+
+                if changed:
+                    # recompute equal share on the reduced active set
+                    continue
+
+                # if we get here, every active cell can support the equal share
+                slice_[active] -= share / dx
+                remaining = 0.0
+
+                state.add_discrete(species_idx, comp, +1)
+                return
 
         # -------------------- DC: SSA -> PDE --------------------
         if block < 3 * n_species:
@@ -915,3 +977,4 @@ class SRCMEngine:
             )
 
         return final_ssa, final_pde, t_final
+        
