@@ -7,10 +7,13 @@ from srcm_engine.conversion import pde_mass_per_compartment
 
 
 def make_engine(domain):
-    conversion = ConversionParams(threshold=5, rate=1.0)
+    conversion = ConversionParams(
+        DC_threshold=5,
+        CD_threshold=3,
+        rate=1.0,
+    )
 
     reactions = HybridReactionSystem(species=["U", "V"])
-    # One hybrid reaction: D_U += 1
     reactions.add_hybrid_reaction(
         reactants={"D_U": 2},
         products={"D_U": 3},
