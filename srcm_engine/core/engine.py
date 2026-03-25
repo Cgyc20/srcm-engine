@@ -80,7 +80,8 @@ class SRCMEngine:
     self,
     state: HybridState,
     pde_mass: np.ndarray,
-    exceeds_mask: np.ndarray,
+    DC_mask: np.ndarray,
+    CD_mask: np.ndarray,
     sufficient_mask: np.ndarray,
     out: Optional[np.ndarray] = None,
 ) -> np.ndarray:
@@ -98,7 +99,8 @@ class SRCMEngine:
         INPUT:
             state: HybridState Container
             pde_mass: The vector containing the PDE mass 
-            exceeds_mask: The vector (n_species, K), int8 mask where 1 means combined mass > threshold else 0.
+            DC_mask:  The vector (n_species, K), int8 mask where 1 means combined_mass > DC_threshold (disc -> cont)
+            CD_mask: The vector (n_species, K), int8 mask where 1 means combined_mass <CD_threshold (Cont -> disc)
             sufficient_mask: Calculated from `sufficient_pde_concentration_mask' function. In regime_utils.py. Mask (n_species,K), 1 if ALL PDE cells in that compartment have concentration >= (1/h), else 0. 
         """
         state.assert_consistent(self.domain)
@@ -134,6 +136,7 @@ class SRCMEngine:
         # NOTE: We do NOT clamp PDE itself. We only forbid negative "available mass"
         # from creating negative propensities.
         # ------------------------------------------------------------------
+        #First block: Conversion from Continuous to Discrete
         for s_idx in range(n_species):
             block = n_species + s_idx
             start = block * K
@@ -141,9 +144,11 @@ class SRCMEngine:
 
             #Charlie:  This is changes made on 16th March 2026, this is because we want to relax the condition for conversion. We want to be able to have mass converted if there exists a point less than 1/h and if there is less than one particles worth.
             # cd_allowed = (exceeds_mask[s_idx, :] == 0) & (sufficient_mask[s_idx, :] == 1)
-            cd_allowed = (exceeds_mask[s_idx, :] == 0) #We actually remove the sufficient mask requirement.
-            
+            #cd_allowed = (exceeds_mask[s_idx, :] == 0) #We actually remove the sufficient mask requirement.
+
             # available PDE mass cannot be negative (if PDE has gone negative, CD must not fire)
+
+            cd_allowed = (CD_mask[s_idx, :] == 1)
             available_mass = np.maximum(pde_mass[s_idx, :], 0.0)
 
             gamma = self.conversion.rate_for(s_idx)
@@ -153,13 +158,13 @@ class SRCMEngine:
         # (2*n_species)..(3*n_species-1): DC (SSA -> PDE)
         # Allowed iff exceeds_mask == 1
         # propensity = gamma * SSA count
-        # ------------------------------------------------------------------
+        # ------------------------------------------------------------------#Second block: Conversion from Discrete to Continuous
         for s_idx in range(n_species):
             block = 2 * n_species + s_idx
             start = block * K
             end = start + K
 
-            dc_allowed = (exceeds_mask[s_idx, :] == 1)
+            dc_allowed = (DC_mask[s_idx, :] == 1)
             gamma = self.conversion.rate_for(s_idx)
             a[start:end] = gamma * state.ssa[s_idx, :] * dc_allowed
 
@@ -392,12 +397,26 @@ class SRCMEngine:
 
         while t0 < t1:
             # masses + masks
-            comb, pde_mass = combined_mass(state.ssa, state.pde, self.domain.pde_multiple, self.domain.dx)
-            exceeds = self.conversion.exceeds_threshold_mask(comb)
-            sufficient = sufficient_pde_concentration_mask(state.pde, self.domain.pde_multiple, self.domain.h)
+            comb, pde_mass = combined_mass(
+                state.ssa, state.pde, self.domain.pde_multiple, self.domain.dx
+                )
+            DC_mask = self.conversion.DC_mask(comb)
+            CD_mask = self.conversion.CD_mask(comb)
+
+
+            # exceeds = self.conversion.exceeds_threshold_mask(comb), removed this on 25th March (when changing to CD to DC mask)
+            sufficient = sufficient_pde_concentration_mask(
+                state.pde, self.domain.pde_multiple, self.domain.h
+                )
 
             # propensities
-            self.build_propensity_vector(state, pde_mass, exceeds, sufficient, out=propensity)
+            self.build_propensity_vector(
+                state,
+                pde_mass,
+                DC_mask,
+                CD_mask,
+                sufficient,
+                out=propensity)
 
                         # DEBUG: decode first negative propensity
             if np.any(propensity < 0):
@@ -422,13 +441,13 @@ class SRCMEngine:
                     print("species:", self.reactions.species[block - n_species])
                     print("pde_mass local:", pde_mass[:, comp])
                     print("sufficient local:", sufficient[:, comp])
-                    print("exceeds local:", exceeds[:, comp])
+                    print("CD_mask local:", CD_mask[:, comp])
 
                 elif block < 3 * n_species:
                     print("Section: DC (SSA -> PDE)")
                     print("species:", self.reactions.species[block - 2 * n_species])
                     print("ssa local:", state.ssa[:, comp])
-                    print("exceeds local:", exceeds[:, comp])
+                    print("DC_mask local:", DC_mask[:, comp])
 
                 else:
                     rxn_idx = block - 3 * n_species
