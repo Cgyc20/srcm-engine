@@ -91,30 +91,25 @@ class HybridModel:
     def conversion(
         self,
         *,
-        threshold: float | Dict[str, float] | List[float] | tuple[float, ...],
+        DC_threshold: float | Dict[str, float] | List[float] | tuple[float, ...],
+        CD_threshold: float | Dict[str, float] | List[float] | tuple[float, ...],
         rate: float | Dict[str, float] | List[float] | tuple[float, ...] = 1.0,
     ) -> "HybridModel":
         """
-        Configure SSA<->PDE conversion.
+        Configure SSA<->PDE conversion with hysteresis thresholds.
 
-        You can supply either:
-          - scalar values (global threshold/rate for all species), OR
-          - per-species values via a dict keyed by species name, OR
-          - per-species sequences aligned with `self.species`.
+        DC_threshold : higher threshold — when combined mass exceeds this, SSA -> PDE
+        CD_threshold : lower threshold — when combined mass drops below this, PDE -> SSA
 
         Examples
         --------
-        m.conversion(threshold=25, rate=0.5)  # global
-        m.conversion(threshold={"A": 10, "B": 50}, rate={"A": 2.0, "B": 0.2})
-        m.conversion(threshold=[10, 50], rate=[2.0, 0.2])  # aligned with species order
+        m.conversion(DC_threshold=8, CD_threshold=5, rate=1.0)
+        m.conversion(DC_threshold={"A": 8, "B": 6}, CD_threshold={"A": 5, "B": 3}, rate=1.0)
         """
 
         def _to_per_species(x: Any, name: str) -> float | List[float]:
-            # scalar -> scalar
             if isinstance(x, (int, float, np.integer, np.floating)):
                 return float(x)
-
-            # dict -> list aligned with self.species
             if isinstance(x, dict):
                 missing = [sp for sp in self.species if sp not in x]
                 extra = [sp for sp in x.keys() if sp not in self.species]
@@ -123,30 +118,21 @@ class HybridModel:
                 if extra:
                     raise ValueError(f"Unknown species in {name}: {extra}")
                 return [float(x[sp]) for sp in self.species]
-
-            # sequence -> must match length
             if isinstance(x, (list, tuple, np.ndarray)):
                 if len(x) != len(self.species):
-                    raise ValueError(
-                        f"{name} must have length {len(self.species)} (one per species)"
-                    )
+                    raise ValueError(f"{name} must have length {len(self.species)}")
                 return [float(v) for v in x]
+            raise TypeError(f"Unsupported type for {name}: {type(x)}")
 
-            raise TypeError(
-                f"Unsupported type for {name}: {type(x)}. Use a scalar, dict, list, tuple, or ndarray."
-            )
-
-        thr_val = _to_per_species(threshold, "threshold")
+        dc_val = _to_per_species(DC_threshold, "DC_threshold")
+        cd_val = _to_per_species(CD_threshold, "CD_threshold")
         rate_val = _to_per_species(rate, "rate")
 
-        # Optional: enforce integer thresholds if that's your intention.
-        # If you want strictly int thresholds, uncomment below:
-        # if isinstance(thr_val, float) and not thr_val.is_integer():
-        #     raise ValueError("Global threshold must be an integer")
-        # if isinstance(thr_val, list) and any((not float(v).is_integer()) for v in thr_val):
-        #     raise ValueError("Per-species thresholds must be integers")
-
-        self._conversion = ConversionParams(threshold=thr_val, rate=rate_val)
+        self._conversion = ConversionParams(
+            DC_threshold=dc_val,
+            CD_threshold=cd_val,
+            rate=rate_val,
+        )
         return self
 
     # ------------------------------------------------------------------
