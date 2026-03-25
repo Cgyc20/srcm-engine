@@ -1,19 +1,23 @@
 # SRCM Engine
 
 **SRCM Engine** is a Python package for simulating **spatial reaction–diffusion systems**
-using a **hybrid stochastic–continuum (SSA–PDE)** framework. This is called the **Spatial regime conversion method**, a method co-authored by Myself (Charles Cameron), Professor Kit Yates and Dr Cameron Smith. This has been the major component of my PhD research at the University of Bath.
+using a **hybrid stochastic–continuum (SSA–PDE)** framework.
 
-This is a Hybrid framework which combined PDE's with stochastic compartment method. This allows the system to switch between either framework dynamically across the spatial domain depending on local particle counts. Please refer to the paper **Cameron, C. G., Smith, C. A., & Yates, C. A. (2025). The Spatial Regime Conversion Method. Mathematics, 13(21), 3406. https://doi.org/10.3390/math13213406Z** for more reading.
+This framework implements the **Spatial Regime Conversion Method (SRCM)**, co-authored by
+**Charles Cameron, Prof. Kit Yates, and Dr Cameron Smith**, forming a major component of my PhD research at the University of Bath.
 
-It is designed for systems in which:
-- particle numbers may be low in some regions (requiring stochastic simulation),
-- but high in others (where a continuum PDE description is more appropriate),
-- and where spatial diffusion is essential.
+The method allows a system to **dynamically switch between discrete (SSA) and continuous (PDE) representations** across space, depending on local particle density.
 
-SRCM Engine automatically couples **discrete stochastic reactions** with **continuous diffusion**
-on a spatial domain, without requiring users to manually write hybrid reaction channels.
+For full details, see:
+
+> Cameron, C. G., Smith, C. A., & Yates, C. A. (2025).
+> *The Spatial Regime Conversion Method.* Mathematics, 13(21), 3406.
+> [https://doi.org/10.3390/math13213406](https://doi.org/10.3390/math13213406)
+
+---
 
 ![Schematic](figures/schematic.png)
+
 ---
 
 ## 1. Motivation
@@ -21,23 +25,28 @@ on a spatial domain, without requiring users to manually write hybrid reaction c
 Many spatial reaction systems sit awkwardly between two classical modelling approaches:
 
 ### Pure SSA
+
 Accurate at low copy numbers, but expensive and noisy at large scales.
 
 ### Pure PDE models
+
 Efficient at large scales, but invalid when particle numbers are small.
 
 Hybrid SSA–PDE methods address this by treating some mass discretely and some continuously.
 However, existing approaches often require:
-- hand-written hybrid propensities,
-- system-specific derivations,
-- or deep knowledge of the numerical method.
+
+* hand-written hybrid propensities
+* system-specific derivations
+* or deep knowledge of the numerical method
 
 **SRCM Engine removes this barrier** by allowing users to:
-1. Write reactions at the *macroscopic* level
-2. Define PDE reaction terms in a natural, mathematical form  
-3. Automatically obtain a consistent hybrid SSA–PDE simulation  
 
-The goal is to make **hybrid spatial modelling accessible, reproducible, and safe**, without sacrificing mathematical correctness or performance.
+1. Write reactions at the *macroscopic* level
+2. Define PDE reaction terms in a natural mathematical form
+3. Automatically obtain a consistent hybrid SSA–PDE simulation
+
+The goal is to make **hybrid spatial modelling accessible, reproducible, and robust**,
+without sacrificing mathematical correctness or performance.
 
 ---
 
@@ -46,22 +55,36 @@ The goal is to make **hybrid spatial modelling accessible, reproducible, and saf
 SRCM Engine is built around the following principles:
 
 ### Hybrid Representation
-- Each species exists in **both discrete (SSA)** and **continuous (PDE)** forms.
-- A **conversion mechanism** dynamically moves mass between the two representations
-  based on local particle numbers.
+
+* Each species exists in **both discrete (SSA)** and **continuous (PDE)** forms.
+* A **conversion mechanism** dynamically moves mass between the two representations
+  using a **two-threshold hysteresis rule**:
+
+  * `DC_threshold` (high): triggers **discrete → continuous**
+  * `CD_threshold` (low): triggers **continuous → discrete**
+
+This prevents rapid oscillations between regimes when particle numbers fluctuate near a boundary.
+
+---
 
 ### Spatial Structure
-- Space is discretised into compartments for SSA.
-- Each compartment is internally resolved by a finer PDE grid.
-- Diffusion is handled consistently across both representations.
+
+* Space is discretised into compartments for SSA.
+* Each compartment is internally resolved by a finer PDE grid.
+* Diffusion is handled consistently across both representations.
+
+---
 
 ### Automatic Hybridisation
-- Users specify **macroscopic reactions** (e.g. `A + B → C`).
-- SRCM Engine automatically decomposes these into the correct hybrid reaction channels:
-  - discrete–discrete
-  - discrete–continuous
-  - continuous–discrete
-- This ensures correctness without user intervention.
+
+* Users specify **macroscopic reactions** (e.g. `A + B → C`).
+* SRCM Engine automatically decomposes these into hybrid reaction channels:
+
+  * discrete–discrete
+  * discrete–continuous
+  * continuous–discrete
+
+This ensures correctness without user intervention.
 
 ---
 
@@ -69,12 +92,12 @@ SRCM Engine is built around the following principles:
 
 At a high level, SRCM Engine consists of:
 
-- `HybridModel` — a **user-facing API** for building models
-- `SRCMEngine` — the core simulation engine
-- `HybridReactionSystem` — reaction bookkeeping and decomposition
-- `Domain` — spatial domain definition
-- `ConversionParams` — rules for SSA ↔ PDE conversion
-- `SimulationResults` — structured output and analysis helpers
+* `HybridModel` — user-facing API for building models
+* `SRCMEngine` — core simulation engine
+* `HybridReactionSystem` — reaction decomposition and bookkeeping
+* `Domain` — spatial domain definition
+* `ConversionParams` — hysteresis-based SSA ↔ PDE conversion rules
+* `SimulationResults` — structured output and analysis tools
 
 Most users will only interact with **`HybridModel`**.
 
@@ -82,15 +105,13 @@ Most users will only interact with **`HybridModel`**.
 
 ## 4. Installation
 
-Clone the repository and install in editable mode:
-
 ```bash
 git clone https://github.com/your-org/srcm-engine.git
 cd srcm-engine
 pip install -e .
-````
+```
 
-Requirements:
+### Requirements
 
 * Python ≥ 3.9
 * NumPy
@@ -101,13 +122,15 @@ Requirements:
 
 ## 5. Quick Start Example
 
-Below is a complete example of a **two-species switching system**:
+We simulate a simple reversible reaction:
 
 $$
 A \rightleftharpoons B
 $$
 
 with spatial diffusion and hybrid dynamics.
+
+---
 
 ### 5.1 Build the Model
 
@@ -126,8 +149,10 @@ m.domain(
 
 m.diffusion(A=0.1, B=0.1)
 
+# Hysteresis-based conversion
 m.conversion(
-    threshold=4,
+    DC_threshold=6,
+    CD_threshold=4,
     rate=1.0,
 )
 
@@ -147,8 +172,6 @@ m.build(rates={"alpha": 0.01, "beta": 0.01})
 ---
 
 ### 5.2 Initial Conditions
-
-Users provide **raw NumPy arrays**:
 
 ```python
 K = m.domain_obj.K
@@ -180,10 +203,7 @@ res = m.run_repeats(
 
 ## 6. Parallel Execution
 
-SRCM Engine supports **parallel execution** of ensemble simulations.
-
-When `parallel=True`, repeated simulations are distributed across CPU cores using
-multi-processing.
+SRCM Engine supports parallel ensemble simulation using multiple CPU cores.
 
 ```python
 res = m.run_repeats(
@@ -197,13 +217,9 @@ res = m.run_repeats(
 )
 ```
 
-### Notes
-
-* Parallelism is optional
+---
 
 ## 7. Saving Results and Metadata
-
-Simulation results can be saved in a portable `.npz` format:
 
 ```python
 from srcm_engine.results.io import save_npz
@@ -218,33 +234,19 @@ meta.update({
 save_npz(res, "ab_switch_mean.npz", meta=meta)
 ```
 
-Metadata includes:
+### Metadata includes:
 
 * domain parameters
 * diffusion coefficients
-* conversion settings
+* conversion settings (**DC_threshold, CD_threshold, rate**)
 * reaction rates
 * hybrid reaction labels
 
 This ensures simulations are **fully reproducible**.
 
 ---
-## 7.5 Saving Final-State Ensembles (Raw Repeat Data)
 
-In addition to ensemble-averaged time series, SRCM Engine supports running
-**multiple independent simulations and saving only the final state from each repeat**.
-
-This is useful when:
-
-- analysing **distributional outcomes** rather than just mean behaviour
-- studying **pattern variability** and stochastic effects
-- performing **post-hoc statistical analysis** on final spatial configurations
-- storing large ensembles efficiently without saving full time series data
-
-Instead of averaging across repeats, this mode returns the **final SSA and PDE
-states from every run**.
-
-### Example: Saving Final Frames from Repeated Simulations
+## 7.5 Saving Final-State Ensembles
 
 ```python
 final_ssa, final_pde, t_final = m.run_repeats_final(
@@ -260,10 +262,17 @@ final_ssa, final_pde, t_final = m.run_repeats_final(
 )
 ```
 
+Useful for:
+
+* distributional analysis
+* stochastic variability
+* large ensemble studies
+
+---
 
 ## 8. Visualisation
 
-### 8.1 Inline Animation (Jupyter)
+### Inline Animation (Jupyter)
 
 ```python
 from IPython.display import HTML, display
@@ -272,7 +281,6 @@ from srcm_engine.animation_util import AnimationConfig, animate_results
 cfg = AnimationConfig(
     stride=20,
     interval_ms=25,
-    threshold_particles=meta["threshold_particles"],
     title="Hybrid Simulation: A ⇌ B",
 )
 
@@ -282,7 +290,7 @@ display(HTML(anim.to_jshtml()))
 
 ---
 
-### 8.2 Time Series Plots
+### Time Series
 
 ```python
 from srcm_engine.animation_util import plot_mass_time_series
@@ -293,23 +301,17 @@ plot_mass_time_series(res)
 
 ## 9. Reaction System Introspection
 
-You can inspect how macroscopic reactions were decomposed:
-
 ```python
 m.describe_reactions()
 ```
 
-This prints:
+Displays:
 
 * macroscopic reactions
-* corresponding hybrid reaction channels
-* propensities and state changes
+* hybrid decompositions
+* propensities and state updates
 
-This is useful for:
-
-* debugging
-* teaching
-* verification
+Useful for debugging and verification.
 
 ---
 
@@ -318,9 +320,9 @@ This is useful for:
 SRCM Engine is well suited for:
 
 * pattern formation (e.g. Turing systems)
-* ecological or biochemical spatial models
-* systems with sharp gradients in particle number
-* models requiring both stochasticity and efficiency
+* ecological or biochemical models
+* systems with strong spatial heterogeneity
+* problems requiring both stochasticity and efficiency
 
 ---
 
@@ -328,37 +330,31 @@ SRCM Engine is well suited for:
 
 Current limitations include:
 
-* reactions of order > 2 are not supported
+* reactions of order > 2 not supported
 * 1D spatial domains only
-* explicit time stepping for PDEs
-
-These are active areas of development.
+* explicit PDE time stepping
 
 ---
 
-## 12. Citation and Attribution
+## 12. Citation
 
-If you use SRCM Engine in academic work, please cite:
+If you use SRCM Engine:
 
 > Cameron, C. (2026).
-> *SRCM Engine: A hybrid stochastic–continuum framework for spatial reaction–diffusion systems.*
+> *SRCM Engine: A hybrid stochastic–continuum framework.*
 
-> *Cameron, C. G., Smith, C. A., & Yates, C. A. (2025). The Spatial Regime Conversion Method. Mathematics, 13(21), 3406. https://doi.org/10.3390/math13213406*
+> Cameron, C. G., Smith, C. A., & Yates, C. A. (2025).
+> *The Spatial Regime Conversion Method.*
+
 ---
 
 ## 13. Contributing
 
-Contributions are welcome.
-
-Suggested areas:
+Contributions welcome:
 
 * higher-order reactions
 * adaptive domains
 * GPU acceleration
 * improved visualisation
 
-Please open an issue or pull request.
-
----
-
-
+Open an issue or PR.
