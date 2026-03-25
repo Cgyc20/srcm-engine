@@ -18,7 +18,7 @@ def test_save_and_load_results_roundtrip(tmp_path: Path):
     prefix = tmp_path / "run1"
     save_results(res, prefix)
 
-    loaded = load_results(prefix)
+    loaded, meta = load_results(prefix)
 
     assert loaded.species == species
     assert loaded.domain == domain

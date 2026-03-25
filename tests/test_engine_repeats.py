@@ -6,7 +6,11 @@ from srcm_engine.core.engine import SRCMEngine
 
 def test_run_repeats_mean_matches_single_when_deterministic():
     domain = Domain(length=1.0, n_ssa=3, pde_multiple=2, boundary="periodic")
-    conversion = ConversionParams(threshold=10, rate=0.0)
+    conversion = ConversionParams(
+    DC_threshold=10,
+    CD_threshold=5,
+    rate=0.0,
+)
 
     reactions = HybridReactionSystem(species=["U"])
     def pde_terms(C, rates):
